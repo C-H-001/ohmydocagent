@@ -50,3 +50,4 @@ figma-design-prompt.md
 /eval/*-out.json
 /eval/ph7.json
 /eval/ph7-out.json
+__pycache__/
