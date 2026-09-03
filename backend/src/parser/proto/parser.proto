@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package ohmydocagent.parser.v1;
+
+service Parser {
+  rpc Parse(ParseRequest) returns (stream ParseEvent);
+}
+
+message ParseRequest {
+  string job_id = 1;
+  string source_url = 2;
+  string mime_type = 3;
+  string engine = 4;
+  string vlm_endpoint = 5;
+  string vlm_model = 6;
+  string vlm_api_key = 7;
+}
+
+message ParseEvent {
+  oneof event {
+    Progress progress = 1;
+    Block block = 2;
+    Asset asset = 3;
+    Completed completed = 4;
+    Error error = 5;
+  }
+}
+
+message Progress {
+  string stage = 1;
+  uint32 percent = 2;
+  string message = 3;
+}
+
+message BoundingBox {
+  float left = 1;
+  float top = 2;
+  float right = 3;
+  float bottom = 4;
+}
+
+message Block {
+  string block_id = 1;
+  string type = 2;
+  string text = 3;
+  uint32 page = 4;
+  uint32 order = 5;
+  BoundingBox bbox = 6;
+  repeated string heading_path = 7;
+  string asset_key = 8;
+}
+
+message Asset {
+  string asset_key = 1;
+  string mime_type = 2;
+  bytes content = 3;
+  uint32 page = 4;
+  BoundingBox bbox = 5;
+  string description = 6;
+}
+
+message Completed {
+  uint32 page_count = 1;
+  uint32 block_count = 2;
+  uint32 asset_count = 3;
+  repeated string warnings = 4;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}

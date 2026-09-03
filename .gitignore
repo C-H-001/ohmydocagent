@@ -1,0 +1,52 @@
+# Node
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# 环境与密钥
+.env
+.env.local
+.env.*.local
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志与临时
+*.log
+.tmp/
+.dispatch/
+.worktrees/
+worktrees/
+
+# 上传数据（本地存储）
+backend/uploads/
+
+# 内部文档（不入库）
+server-operations.md
+handoff-prompt.md
+figma-design-prompt.md
+
+# eval 一次性调试脚本 / 结果缓存（probe/verify/local/rerun…不入库；有效资产
+# eval/lib、run-*.js、judge-reeval.js、manual-*.js、mmlongbench.json 保留）
+/eval/probe-*
+/eval/verify-*
+/eval/local-*
+/eval/rerun*
+/eval/reg-*
+/eval/regression-*
+/eval/rank-*
+/eval/set-*
+/eval/fix-*
+/eval/fill-*
+/eval/test-*
+/eval/init-*
+/eval/login-local.js
+/eval/batch-*
+/eval/manual-search-ph*
+/eval/**/*.bak
+/eval/*-out.json
+/eval/ph7.json
+/eval/ph7-out.json

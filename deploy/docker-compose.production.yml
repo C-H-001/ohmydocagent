@@ -1,0 +1,253 @@
+# OhMyDocAgent 生产部署 compose（单机）
+# 用法：cp .env.example .env 并填写；docker compose -f docker-compose.production.yml up -d
+# 数据卷建议挂到数据盘 /data（见 server-operations.md 挂载说明）
+name: ohmydocagent
+
+services:
+  postgres:
+    image: paradedb/paradedb:v0.22.2-pg17
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ohmydocagent}
+      POSTGRES_USER: ${DB_USER:-ohmydocagent}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ohmydocagent}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${DB_USER:-ohmydocagent} -d $${DB_NAME:-ohmydocagent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:2025.10.1
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-ohmydocagent-local-secret}
+    ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
+    volumes: ["neo4j-data:/data", "neo4j-logs:/logs"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-ohmydocagent}
+      DB_PASSWORD: ${DB_PASSWORD:-ohmydocagent}
+      DB_NAME: ${DB_NAME:-ohmydocagent}
+      DB_SYNC: "0"          # 生产强制 0（表结构由 migration 管理）
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-ohmydocagent-local-secret}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      UPLOAD_DIR: /data/uploads
+      # 初始化安全（Task 0.5 登记项）：生产设置 INIT_TOKEN 后 /auth/init 需校验
+      INIT_TOKEN: ${INIT_TOKEN:-}
+      # 真实解析服务（gRPC，见 parser/README.md）
+      PARSER_URL: ${PARSER_URL:-}
+      PARSER_FILE_BASE_URL: ${PARSER_FILE_BASE_URL:-}
+      PARSER_ENGINE: ${PARSER_ENGINE:-mineru}
+      # 图片 VLM（图表 Caption）：parser 对文档图片调 VLM 生成 description——
+      # 缺省不配则跳过图片处理（asset 事件数为 0，见 parser/README.md）
+      PARSER_VLM_ENDPOINT: ${PARSER_VLM_ENDPOINT:-}
+      PARSER_VLM_MODEL: ${PARSER_VLM_MODEL:-}
+      PARSER_VLM_API_KEY: ${PARSER_VLM_API_KEY:-}
+      # Langfuse 可观测（链路 trace：LANGFUSE_ENABLED=1 开启；key 见 backend 配置
+      # 说明——HOST 默认 compose 服务名 langfuse:3000，容器内可达）
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      # 存储后端：MinIO 对象存储（生产）
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ohmydocagent}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ohmydocagent-local-secret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ohmydocagent}
+    volumes: ["/data/ohmydocagent/uploads:/data"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    ports: ["127.0.0.1:3000:3000"]
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    ports: ["80:80"]
+    depends_on: [backend]
+    restart: unless-stopped
+
+  # 真实解析服务（MinerU 引擎，镜像 ohmydocagent/parser:fixed，见 parser/README.md）
+  # 注意：CPU 推理吃资源（4C14G 无 GPU）——按需启用；后端配 PARSER_URL=parser:50051
+  parser:
+    image: ohmydocagent/parser:fixed
+    ports: ["127.0.0.1:50051:50051"]
+    environment:
+      OHMYDOCAGENT_PARSER_PORT: 50051
+    volumes: []
+    restart: unless-stopped
+
+  # MinIO 对象存储（上传文件保存，见 parser/README.md 与 storage 模块）
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ohmydocagent}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ohmydocagent-local-secret}
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    volumes: ["/data/ohmydocagent/minio:/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # Langfuse 观测（评测链路，独立镜像；生产默认不启动——profile: evaluation，
+  # 需要评测时：docker compose --profile evaluation up -d langfuse langfuse-db
+  # 后端开启：LANGFUSE_ENABLED=true + 密钥（见 deploy/.env.example））
+  langfuse:
+    image: langfuse/langfuse:3
+    profiles: ["evaluation"]
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD:-langfuse-local}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-ohmydocagent-langfuse-secret}
+      SALT: ${LANGFUSE_SALT:-ohmydocagent-langfuse-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      OTEL_EXPORTER_OTLP_ENABLED: "false"
+      # Langfuse v3：traces 存 ClickHouse + 元数据 PG + 队列 Redis
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse-local}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}
+      TELEMETRY_ENABLED: "false"
+      # 媒体/事件上传 → OhMyDocAgent MinIO（AWS SDK 需完整 env：region 缺失会
+      # abort 事件处理致 trace 不落库；endpoint 指向 minio:9000，bucket
+      # langfuse-blobs 由部署脚本 mc mb 创建）
+      # 事件 S3 客户端读专用键（LANGFUSE_S3_EVENT_UPLOAD_*，非 AWS_* env）：
+      # region/凭据/endpoint 全套 → 指向 OhMyDocAgent MinIO；bucket langfuse-blobs
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-blobs
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-ohmydocagent}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-ohmydocagent-local-secret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      # path-style（MinIO）：事件 S3 客户端专属开关（源码校验该 env）
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD: "true"
+      AWS_REGION: us-east-1
+      AWS_USE_PATH_STYLE_ENDPOINT: "true"
+
+    ports: ["127.0.0.1:3001:3000"]
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    profiles: ["evaluation"]
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_URL: http://localhost:3000
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  langfuse-db:
+    image: postgres:16-alpine
+    profiles: ["evaluation"]
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse-local}
+    volumes: ["langfuse-db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    profiles: ["evaluation"]
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse-local}
+    volumes: ["langfuse-clickhouse-data:/var/lib/clickhouse"]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  langfuse-redis:
+    image: redis:7-alpine
+    profiles: ["evaluation"]
+    command: ["redis-server", "--requirepass", "${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${LANGFUSE_REDIS_AUTH:-langfuse-redis-secret}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+
+volumes:
+  langfuse-db-data:
+  langfuse-clickhouse-data:
+  pg-data:
+  redis-data:
+  neo4j-data:
+  neo4j-logs:
