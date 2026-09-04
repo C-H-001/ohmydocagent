@@ -1,5 +1,5 @@
-# DocMind 前端生产镜像：构建静态资源 → nginx 托管
-# 构建：docker build -t docmind/web:<tag> -f frontend/Dockerfile frontend
+# OhMyDocAgent 前端生产镜像：构建静态资源 → nginx 托管
+# 构建：docker build -t ohmydocagent/web:<tag> -f frontend/Dockerfile frontend
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./

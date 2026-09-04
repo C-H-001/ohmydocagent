@@ -1,4 +1,4 @@
-# DocMind 后端生产镜像（多阶段，简单布局：全部放 /app）
+# OhMyDocAgent 后端生产镜像（多阶段，简单布局：全部放 /app）
 # 构建：docker compose build backend（context=仓库根，dockerfile=backend/Dockerfile）
 FROM node:20-alpine AS build
 WORKDIR /app
