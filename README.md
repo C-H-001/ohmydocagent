@@ -44,11 +44,3 @@ npm run dev:frontend # 启动前端（React，默认 :5173）
 ### 3. 模型配置
 
 首次使用在「设置 → 模型管理」配置对话 / 向量 / 重排模型（OpenAI 兼容 / 兼容供应商均可）。
-
-## 测试
-
-```bash
-cd backend
-npm run test        # 单元测试
-npm run test:e2e    # 端到端测试
-```
