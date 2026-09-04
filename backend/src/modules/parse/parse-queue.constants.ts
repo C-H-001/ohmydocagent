@@ -8,7 +8,7 @@ export const PARSE_QUEUE = 'parse';
 export const EMBED_QUEUE = 'embed';
 
 /** 自动摘要队列（Task 1.7）：分块成功后入队，SummaryProcessor 消费
- * （mock LLM 生成摘要落 knowledge.summary，见 summary.processor.ts） */
+ * （见 summary.processor.ts） */
 export const SUMMARY_QUEUE = 'summary';
 
 /** 解析任务载荷：只携带 knowledgeId，解析所需字段（fileType/filePath/url/manualContent）

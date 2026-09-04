@@ -6,7 +6,7 @@
 // service 直接注入 AuditService 即可，零 import 改动、无循环依赖；控制器仍
 // 归属于本模块（路由只随 AppModule → AdminModule 挂载一次）。单元测试用
 // Test.createTestingModule({ providers }) 构建时不受 @Global 影响（需显式
-// provide mock，见各 spec 注释），与既有测试模式一致。
+// ）
 import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditController } from './audit.controller.js';

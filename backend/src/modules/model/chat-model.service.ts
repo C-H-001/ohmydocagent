@@ -1,5 +1,5 @@
 // backend/src/modules/model/chat-model.service.ts
-// 真实 ChatModelService 实现（Task 2.3，替换 Task 1.7 的 MockChatModelService）：
+// ChatModelService 实现（按默认对话模型配置路由到供应商）：
 // 按「默认 chat 模型」配置路由到对应供应商（openai-compatible / ollama）。
 // 无默认模型 → ServiceUnavailableException 503「未配置默认对话模型」——
 // 语义：摘要/标题等 LLM 管线在未配置模型时显式失败（而不是静默返回空或
@@ -8,9 +8,8 @@
 // 消费方（SummaryProcessor/TitleProcessor）零改动——只换 ModelModule 的
 // provider 绑定（见 model.module.ts）。
 //
-// Mock 的去留：MockChatModelService 保留在 mock/ 目录供测试 overrideProvider
+// 
 // 注入（既有 e2e——title/knowledge-status——依赖确定性固定文本，见各文件
-// override 注释；本文件不再包含 mock）。
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type {
   ChatMessage,

@@ -1,9 +1,7 @@
 // 模型模块（Task 1.6 + Task 1.7 + Task 2.3）：
 // - 提供 EmbeddingService / ChatModelService 抽象的实现（Task 2.3 起为真实
 //   实现 EmbeddingServiceImpl / ChatModelServiceImpl，按默认模型配置路由到
-//   对应供应商，见各实现注释）；既有 mock 保留在 mock/ 目录，测试用
-//   overrideProvider 注入（既有 e2e 依赖确定性 mock，见 test/ 下各文件
-//   override 注释）。
+//   对应供应商，见各实现注释）。
 // - 模型管理（Task 2.3）：Model 实体 + CRUD + 默认模型 + 连通性测试端点
 //   （ModelController/ModelService/CryptoService/供应商实现/工厂）。
 // 依赖方向：本模块被 ParseModule（向量化/摘要管线）与 ChatModule（标题生成）
@@ -36,7 +34,7 @@ import { OllamaProvider } from './providers/ollama.provider.js';
     OpenAICompatibleProvider,
     OllamaProvider,
     LLMProviderFactory,
-    // LLM 抽象绑定（Task 2.3 起默认真实实现；测试 overrideProvider 注入 mock）
+    // LLM 抽象绑定（默认真实实现）
     { provide: CHAT_MODEL_SERVICE, useClass: ChatModelServiceImpl },
     { provide: EMBEDDING_SERVICE, useClass: EmbeddingServiceImpl },
   ],

@@ -1,12 +1,9 @@
 // backend/src/modules/model/embedding.service.ts
-// 真实 EmbeddingService 实现（Task 2.3，替换 Task 1.6 的 MockEmbeddingService）：
+// EmbeddingService 实现（按默认向量模型配置路由到供应商）：
 // 按「默认 embedding 模型」配置路由到对应供应商（openai-compatible / ollama）。
 // 无默认模型 → ServiceUnavailableException 503「未配置默认向量模型」（语义同
 // ChatModelServiceImpl，见 chat-model.service.ts 注释）。
 //
-// Mock 的去留：MockEmbeddingService 保留在 mock/ 目录供测试 overrideProvider
-// 注入（vector/chunk-revision 等既有 e2e 依赖 n-gram 特征哈希的确定性向量，
-// 见各文件 override 注释；本文件不再包含 mock）。
 //
 // dimension：**读取 EMBEDDING_DIMENSION（1024）**——与 chunk.entity embedding vector(1024)
 // 列一致（pgvector 列维度在 DDL 定死，改列要 migration）。真实模型维度

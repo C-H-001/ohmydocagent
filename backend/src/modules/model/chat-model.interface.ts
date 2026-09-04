@@ -1,5 +1,5 @@
 // LLM 对话抽象（Task 1.7）：ChatModelService 是摘要等 LLM 能力的统一入口。
-// P1 用 MockChatModelService（固定中文文本，见 chat-model.service.ts 注释），
+// 实现见 chat-model.service.ts（真实 LLM 按默认模型配置路由），
 // Task 2.3 接入真实供应商（OpenAI 兼容端点等）时实现本接口并在 ModelModule
 // 替换 provider 绑定——消费方（SummaryProcessor）零改动。
 // 流式接口 chatStream（Task 2.4）：对话/流式输出场景的增量变体，与 chat()
@@ -57,9 +57,9 @@ export interface ChatMessage {
 export interface ChatOptions {
   /** BYOK：请求归属用户（用户私有模型优先，全局兜底） */
   userId?: string;
-  /** 采样温度（真实实现透传供应商参数；mock 忽略） */
+  /** 采样温度（透传供应商参数） */
   temperature?: number;
-  /** 最大生成 token 数（真实实现透传；mock 忽略） */
+  /** 最大生成 token 数（透传供应商参数） */
   maxTokens?: number;
   /** 取消信号（Task 2.4 质量审查整改：客户端断连时编排器 abort，供应商 fetch
    * 传该 signal 停止上游生成——烧 token 止损；真实供应商实现把它与内部超时

@@ -112,7 +112,7 @@ export class EmbedProcessor extends WorkerHost {
     try {
       // 批量向量化（分批：真实 embedding 供应商单次请求有 batch 上限——
       // 已实测 dashscope text-embedding-v4 单次 ≤10 条，156 块一次请求
-      // 必然 400 失败。MockEmbeddingService 单批无此限制，分批对结果无影响）
+      // 必然 400 失败；分批对结果无影响）
       const EMBED_BATCH = 10;
       const vectors: number[][] = [];
       let embedTokens = 0;
@@ -232,7 +232,7 @@ export class EmbedProcessor extends WorkerHost {
     }
     const chunk = rows[0];
     try {
-      // 单块 embed（MockEmbeddingService 确定性；Task 2.3 换真实模型时
+      // 单块 embed（
       // 此处同样只嵌入一块，批量调用合并优化不适用）
       const [vector] = await this.embedding.embed([chunk.content]);
       // 单条 upsert（rowCount 校验：块在读取后被删则抛错 → 走失败标记 + 重试

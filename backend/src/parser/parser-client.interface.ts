@@ -1,4 +1,4 @@
-// 解析服务契约（Task 1.4）：任何实现（P1 占位 PlaceholderParser / 后期真实解析服务）
+// 解析服务契约：任何实现（真实 gRPC 解析服务）
 // 都返回统一结构。后期接入 ohmydocagent/parser 真实服务时，只需实现本接口并在
 // ParserModule 中替换 provider，解析管线（ParseProcessor）无需改动。
 export interface ParsedImage {

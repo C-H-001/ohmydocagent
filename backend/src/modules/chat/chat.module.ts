@@ -68,7 +68,7 @@ import { GraphSearchTool } from './agent/tools/graph-search.tool.js';
       // Task 3.4：KbSearchTool 图谱增强补充候选查 chunk 内容
       Chunk,
     ]),
-    // Task 2.2：LLM 对话抽象（标题生成/Agent 工具循环，mock 占位见 model.module.ts）
+    // LLM 对话抽象（标题生成/Agent 工具循环）
     ModelModule,
     // 模型用量（生成完成后累计 token，供普通用户用量管理界面）
     UsageModule,

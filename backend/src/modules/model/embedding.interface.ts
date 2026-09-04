@@ -1,4 +1,4 @@
-// 向量化服务契约（Task 1.6）：任何实现（P1 mock / Task 2.3 真实模型）都返回
+// 向量化服务契约：任何实现都返回
 // 统一结构。与 ParserClient 同模式（见 parser/parser-client.interface.ts）：
 // 接口是 TS 类型，运行时需显式 DI 令牌（Symbol 防字符串撞名）；接入真实模型
 // 时只需实现本接口并在 ModelModule 替换 provider，向量化管线（EmbedProcessor）
@@ -25,8 +25,7 @@ export interface EmbeddingService {
 
 /** 向量维度常量：与 chunk.entity embedding vector(1024) 列一致（见该列注释）。
  * 放在接口文件——dimension 是 EmbeddingService 契约的一部分（真实实现
- * EmbeddingServiceImpl 与 MockEmbeddingService 共用，见 embedding.service.ts
- * 与 mock/mock-embedding.service.ts）。
+ * 见 embedding.service.ts。
  *
  * 2026-08-29 调整为 1024：真实默认 embedding 模型「通义千问 qwen3.7-text-embedding」
  * 返回 1024 维（实测）。**维度必须与默认 embedding 模型匹配**——更换默认模型为

@@ -89,7 +89,7 @@ import { AdminModule } from './modules/admin/admin.module.js';
     ChunkModule,
     // 解析队列（Task 1.4）：ParseProcessor worker 消费 PARSE_QUEUE，占位文本抽取
     ParseModule,
-    // 模型（Task 1.6）：EmbeddingService 抽象 + mock 实现（Task 2.3 换真实模型）
+    // 模型：EmbeddingService / ChatModelService 抽象（按默认模型配置路由）
     ModelModule,
     // 向量检索（Task 1.6）：VectorService（pgvector 读写 + 混合检索），
     // 被 KbModule（hybrid-search 端点）与 ParseModule（批量 upsert）消费；

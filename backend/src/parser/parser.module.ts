@@ -1,6 +1,5 @@
-// 解析服务模块：PARSER_CLIENT 抽象实现按配置切换——
-//   PARSER_URL 设置 → 真实解析服务（GrpcParser，ohmydocagent/parser:fixed）；
-//   未设置 → 占位解析器（PlaceholderParser，pdf-parse/mammoth）。
+// 解析服务模块：PARSER_CLIENT 抽象实现——经 gRPC 对接解析服务（GrpcParser，
+// 见 parser/README.md）。PARSER_URL 必须配置（未配置启动报错）。
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StorageModule } from '../modules/storage/storage.module.js';
@@ -8,8 +7,6 @@ import { PARSER_CLIENT } from './parser-client.interface.js';
 import { ParserFileController } from './parser-file.controller.js';
 import { ParserFileGuard } from './parser-file.controller.js';
 import { GrpcParser } from './grpc-parser.js';
-import { PlaceholderParser } from './placeholder-parser.js';
-import { StorageService } from '../modules/storage/storage.service.js';
 
 @Module({
   imports: [StorageModule],
@@ -18,14 +15,17 @@ import { StorageService } from '../modules/storage/storage.service.js';
     ParserFileGuard,
     {
       provide: PARSER_CLIENT,
-      useFactory: (config: ConfigService, storage: StorageService) => {
+      useFactory: (config: ConfigService) => {
         const target = config.get<string>('parserUrl');
-        if (target) {
-          return new GrpcParser(config);
+        if (!target) {
+          throw new Error(
+            'PARSER_URL 未配置：文档解析依赖解析服务（见 parser/README.md——' +
+              '设置 PARSER_URL 为解析服务 gRPC 地址）',
+          );
         }
-        return new PlaceholderParser(storage);
+        return new GrpcParser(config);
       },
-      inject: [ConfigService, StorageService],
+      inject: [ConfigService],
     },
   ],
   exports: [PARSER_CLIENT, ParserFileGuard],
