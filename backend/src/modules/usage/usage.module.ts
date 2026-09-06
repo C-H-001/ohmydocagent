@@ -5,11 +5,12 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/user.entity.js';
 import { ModelUsage } from './model-usage.entity.js';
+import { UsageEvent } from './usage-event.entity.js';
 import { ModelUsageService } from './model-usage.service.js';
 import { UsageController } from './usage.controller.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ModelUsage, User])],
+  imports: [TypeOrmModule.forFeature([ModelUsage, UsageEvent, User])],
   controllers: [UsageController],
   providers: [ModelUsageService],
   exports: [ModelUsageService],

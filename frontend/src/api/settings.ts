@@ -284,9 +284,27 @@ export interface ModelUsageRow {
   outputTokens: number
 }
 
+/** 趋势单日数据点（某模型当天 calls/tokens） */
+export interface TrendPoint {
+  calls: number
+  tokens: number
+  name?: string
+}
+
+/** 趋势单日行：date + 该日各模型用量（models 键 = modelId） */
+export interface TrendDay {
+  date: string
+  models: Record<string, TrendPoint>
+}
+
 export const usageApi = {
   /** GET /me/model-usage 当前用户自己的模型用量 */
   listMine(): Promise<{ items: ModelUsageRow[]; totalTokens: number; totalCalls: number }> {
     return api.get("/me/model-usage")
+  },
+
+  /** GET /me/model-usage/trend?days=N 用量趋势（近 N 天按日 per-model） */
+  trend(days = 30): Promise<TrendDay[]> {
+    return api.get("/me/model-usage/trend", { query: { days: String(days) } })
   },
 }

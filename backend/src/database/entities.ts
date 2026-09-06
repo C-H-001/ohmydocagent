@@ -14,6 +14,7 @@ import { KnowledgeTag } from '../modules/knowledge/knowledge-tag.entity.js';
 import { Tag } from '../modules/knowledge/tag.entity.js';
 import { User } from '../modules/users/user.entity.js';
 import { ModelUsage } from '../modules/usage/model-usage.entity.js';
+import { UsageEvent } from '../modules/usage/usage-event.entity.js';
 import { Session } from '../modules/chat/session.entity.js';
 import { Message } from '../modules/chat/message.entity.js';
 import { Model } from '../modules/model/model.entity.js';
@@ -27,6 +28,7 @@ export const entities = [
   ProbeEntity,
   User,
   ModelUsage,
+  UsageEvent,
   Invitation,
   KnowledgeBase,
   UserKbPin,
@@ -52,6 +54,7 @@ export {
   ProbeEntity,
   User,
   ModelUsage,
+  UsageEvent,
   Invitation,
   KnowledgeBase,
   UserKbPin,

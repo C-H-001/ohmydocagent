@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { User } from '../users/user.entity.js';
 import { ModelUsage } from './model-usage.entity.js';
+import { UsageEvent } from './usage-event.entity.js';
 
 export interface UsageRow {
   modelId: string;
@@ -26,6 +27,8 @@ export class ModelUsageService {
     private readonly usageRepository: Repository<ModelUsage>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(UsageEvent)
+    private readonly eventRepository: Repository<UsageEvent>,
   ) {}
 
   /** 记录一次生成用量（原子累计；失败仅日志级影响——用量是辅助数据，不阻断对话） */
@@ -91,6 +94,31 @@ export class ModelUsageService {
           }
         }
       }
+      // 补写明细行（趋势图数据源——按日聚合用）。独立事务/失败不阻断累计
+      // （明细是辅助；累计行已成功）。清理 >90 天旧明细（随写随清，控制表膨胀）
+      try {
+        await this.eventRepository.insert({
+          userId: input.userId,
+          modelId: input.modelId,
+          modelName: input.modelName,
+          type: input.type ?? 'chat',
+          inputTokens,
+          outputTokens,
+        });
+        // 顺带清理 90 天前明细（低频——每次记录删一次远早于保留窗口的行）
+        await this.eventRepository
+          .createQueryBuilder()
+          .delete()
+          .where(`"createdAt" < NOW() - INTERVAL '90 days'`)
+          .execute();
+      } catch (err) {
+        // 明细失败不影响累计（辅助中的辅助——仅告警）
+        // eslint-disable-next-line no-console
+        console.error(
+          `用量明细记录失败: userId=${input.userId}`,
+          err,
+        );
+      }
     } catch (err) {
       // 用量记录失败不阻断对话（辅助数据；日志由调用方捕获）
       // eslint-disable-next-line no-console
@@ -144,5 +172,71 @@ export class ModelUsageService {
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
     }));
+  }
+
+  /**
+   * 用量趋势（按日聚合——图表数据源）：近 N 天（默认 30，上限 90）每天各
+   * 模型的调用次数与 token 消耗。按日 GROUP BY（日期用本地时区——数据库
+   * 会话时区决定，生产 UTC；前端按展示即可）。
+   * 返回 [{ date: 'YYYY-MM-DD', models: { modelId: { calls, tokens } } }]——
+   * 模型动态（用户配置过哪些就返回哪些），缺失日期的模型记 0（前端堆叠图
+   * 需连续轴）。
+   */
+  async trend(
+    userId: string,
+    days = 30,
+  ): Promise<Array<{ date: string; models: Record<string, { calls: number; tokens: number; name: string }> }>> {
+    const clamped = Math.min(Math.max(days, 1), 90);
+    const rows: Array<{
+      day: string;
+      modelId: string;
+      modelName: string;
+      calls: string;
+      tokens: string;
+    }> = await this.eventRepository
+      .createQueryBuilder('e')
+      .select("TO_CHAR(e.\"createdAt\", 'YYYY-MM-DD')", 'day')
+      .addSelect('e."modelId"', 'modelId')
+      .addSelect('MAX(e."modelName")', 'modelName')
+      .addSelect('COUNT(*)', 'calls')
+      .addSelect('SUM(e."inputTokens" + e."outputTokens")', 'tokens')
+      .where('e."userId" = :userId', { userId })
+      .andWhere('e."createdAt" >= NOW() - (:days || \' days\')::interval', {
+        days: clamped,
+      })
+      .groupBy('day')
+      .addGroupBy('e."modelId"')
+      .orderBy('day', 'ASC')
+      .getRawMany<{
+        day: string;
+        modelId: string;
+        modelName: string;
+        calls: string;
+        tokens: string;
+      }>();
+
+    // 组装：每天 → 模型映射（缺失补 0——连续日期轴）
+    const byDay = new Map<string, Record<string, { calls: number; tokens: number; name: string }>>();
+    const modelNames = new Map<string, string>();
+    for (const r of rows) {
+      modelNames.set(r.modelId, r.modelName);
+      const day = byDay.get(r.day) ?? {};
+      day[r.modelId] = {
+        calls: Number(r.calls ?? 0),
+        tokens: Number(r.tokens ?? 0),
+        name: r.modelName,
+      };
+      byDay.set(r.day, day);
+    }
+    // 连续日期（含无数据的天——前端堆叠图轴连续）
+    const out: Array<{ date: string; models: Record<string, { calls: number; tokens: number; name: string }> }> = [];
+    const today = new Date();
+    for (let i = clamped - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      out.push({ date: key, models: byDay.get(key) ?? {} });
+    }
+    return out;
   }
 }

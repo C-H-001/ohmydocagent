@@ -490,7 +490,9 @@ export class ChatOrchestratorService {
       return;
     }
     try {
-      const model = await this.modelService.getDefault('chat');
+      // BYOK：getDefault 无 userId 返回 null（无全局回退）——必须传当前用户，
+      // 否则用量永远记录不上（对话用哪个模型就用该用户的默认 chat 模型）
+      const model = await this.modelService.getDefault('chat', userId);
       if (!model) return;
       await this.usageService.record({
         userId,

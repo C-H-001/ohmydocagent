@@ -14,6 +14,7 @@
 //   版本信息 GET /system/info
 
 import { useCallback, useEffect, useState } from "react"
+import { UsageTrendChart } from "./UsageTrendChart"
 import {
   ShieldAlert, Plus, Loader2, Check, X, Copy, Eye, EyeOff,
   Trash2, Crown, Shield, RefreshCw, AlertCircle,
@@ -1670,6 +1671,9 @@ function ModelUsageSettings() {
         title="模型用量"
         desc="您在各对话模型上的调用次数与 Token 消耗（个人维度）"
       />
+      {/* 每日用量趋势图 */}
+      <UsageTrendChart />
+
       {/* 汇总卡片 */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card border border-border rounded-lg p-4">
