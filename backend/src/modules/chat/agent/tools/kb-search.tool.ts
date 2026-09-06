@@ -195,13 +195,18 @@ export class KbSearchTool implements Tool {
       );
     }
     const searchQueries = [query, ...expandedQueries.filter((q) => q && q !== query)].slice(0, 3);
+    // BYOK 一致性：query 嵌入须用与库相同的模型（KB 创建者的默认 embedding——
+    // 入库时按 knowledgeOwnerId 用创建者模型；若查询用访问者模型，共享 KB 下
+    // 维度/语义不一致导致检索失真）。取首个目标 KB 创建者（多 KB 同现状「取
+    // 首个配置」约定）；查不到（权限/异常）回退访问者自身。
+    const embedUserId = await this.kbOwnerId(scopeKbIds) ?? ctx.userId;
     let chunks: HybridSearchItem[] = [];
     try {
       const results = await Promise.all(
         searchQueries.map((q) =>
           scopeKnowledgeIds.length > 0
-            ? this.vectorService.hybridSearch(scopeKbIds, q, topK, scopeKnowledgeIds, retrieval.vectorThreshold, ctx.userId)
-            : this.vectorService.hybridSearch(scopeKbIds, q, topK, undefined, retrieval.vectorThreshold, ctx.userId),
+            ? this.vectorService.hybridSearch(scopeKbIds, q, topK, scopeKnowledgeIds, retrieval.vectorThreshold, embedUserId)
+            : this.vectorService.hybridSearch(scopeKbIds, q, topK, undefined, retrieval.vectorThreshold, embedUserId),
         ),
       );
       // 合并去重：同一 chunk 出现在多路检索 → 分数取最高（多角度命中加分，
@@ -262,6 +267,7 @@ export class KbSearchTool implements Tool {
       query,
       chunks.slice(0, Math.min(topK * 2, 30)).map((c) => c.content),
       topK,
+      ctx.userId,
     );
     if (reranked && reranked.length > 0) {
       const byIndex = new Map(reranked.map((r) => [r.index, r]));
@@ -333,6 +339,21 @@ export class KbSearchTool implements Tool {
   }
 
   /** 读 KB 检索配置（首个目标 KB；缺省默认——WeKnora 默认向量偏重） */
+  /** 目标 KB 创建者 id（query 嵌入用创建者模型——与入库一致，见 execute 注释）；
+   *  查不到返回 null（调用方回退访问者自身）。 */
+  private async kbOwnerId(kbIds: string[]): Promise<string | null> {
+    if (kbIds.length === 0) return null;
+    try {
+      const kb = await this.kbRepo.findOne({
+        where: { id: kbIds[0] },
+        select: { creatorId: true },
+      });
+      return kb?.creatorId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async loadRetrievalConfig(kbIds: string[]): Promise<{
     vectorThreshold: number;
   }> {

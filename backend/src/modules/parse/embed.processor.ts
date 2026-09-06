@@ -222,8 +222,11 @@ export class EmbedProcessor extends WorkerHost {
     chunkId: string,
   ): Promise<{ embedded: number }> {
     const rows = await this.dataSource.query<
-      Array<{ id: string; content: string }>
-    >(`SELECT id, content FROM chunks WHERE id = $1`, [chunkId]);
+      Array<{ id: string; content: string; kbId: string }>
+    >(
+      `SELECT c.id, c.content, c."kbId" FROM chunks c WHERE c.id = $1`,
+      [chunkId],
+    );
     if (rows.length === 0) {
       this.logger.warn(
         `单块向量化任务引用的分块不存在（可能已删除），跳过: ${chunkId}`,
@@ -231,10 +234,13 @@ export class EmbedProcessor extends WorkerHost {
       return { embedded: 0 };
     }
     const chunk = rows[0];
+    // BYOK 一致性：与批量路径同——按 KB 创建者模型嵌入（编辑块重向量化与
+    // 库内其他块同模型，见 process() 的 knowledgeOwnerId 注释）
+    const ownerId = await this.kbOwnerByKbId(chunk.kbId);
     try {
       // 单块 embed（
       // 此处同样只嵌入一块，批量调用合并优化不适用）
-      const [vector] = await this.embedding.embed([chunk.content]);
+      const [vector] = await this.embedding.embed([chunk.content], ownerId ?? undefined);
       // 单条 upsert（rowCount 校验：块在读取后被删则抛错 → 走失败标记 + 重试
       // → 重试时块不存在 → no-op，见 VectorService.upsertEmbedding 注释）
       await this.vectorService.upsertEmbedding(chunk.id, vector);
@@ -276,6 +282,19 @@ export class EmbedProcessor extends WorkerHost {
 
   /** BYOK：文档归属用户（knowledge → KB → creatorId）——向量化用用户私有
    *  embedding 模型（无则全局兜底）；查不到 → null（走全局） */
+  /** 按知识库 id 查创建者（单块向量化路径用——chunk 的 kbId 直查） */
+  private async kbOwnerByKbId(kbId: string): Promise<string | null> {
+    try {
+      const rows = await this.dataSource.query<{ creatorId: string | null }[]>(
+        `SELECT "creatorId" FROM knowledge_bases WHERE id = $1`,
+        [kbId],
+      );
+      return rows[0]?.creatorId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async knowledgeOwnerId(knowledgeId: string): Promise<string | null> {
     try {
       const rows = await this.dataSource.query<{ creatorId: string | null }[]>(
