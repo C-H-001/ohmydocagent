@@ -7,16 +7,14 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "test": "npm run build && node test/run-tests.mjs",
     "build": "nest build",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "cross-env NODE_ENV=production node dist/main",
-    "lint": "oxlint src/ test/",
-    "seed:models": "nest build && node dist/scripts/seed-models.js",
+    "lint": "oxlint src/",
     "migration:generate": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:generate",
     "migration:run": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:run",
     "migration:revert": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:revert"

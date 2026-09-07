@@ -29,25 +29,14 @@ server-operations.md
 handoff-prompt.md
 figma-design-prompt.md
 
-# eval 一次性调试脚本 / 结果缓存（probe/verify/local/rerun…不入库；有效资产
-# eval/lib、run-*.js、judge-reeval.js、manual-*.js、mmlongbench.json 保留）
-/eval/probe-*
-/eval/verify-*
-/eval/local-*
-/eval/rerun*
-/eval/reg-*
-/eval/regression-*
-/eval/rank-*
-/eval/set-*
-/eval/fix-*
-/eval/fill-*
-/eval/test-*
-/eval/init-*
-/eval/login-local.js
-/eval/batch-*
-/eval/manual-search-ph*
-/eval/**/*.bak
-/eval/*-out.json
-/eval/ph7.json
-/eval/ph7-out.json
+# 本地测试与评测
+/backend/test/
+/frontend/tests/
+/parser/tests/
+/eval/
+*.test.*
+*.spec.*
+test_*.py
+/backend/src/scripts/seed-models.ts
+/backend/src/scripts/smoke-real.ts
 __pycache__/

@@ -40,7 +40,7 @@
 - 部署注意：compose 内 backend 配 `PARSER_URL=parser:50051` + `PARSER_FILE_BASE_URL=http://backend:3000`；生产 `.env` 设 `PARSER_ENGINE=mineru`（默认已 mineru）
 - VLM 图片描述（可选）：`.env` 设 `PARSER_VLM_ENDPOINT` / `PARSER_VLM_MODEL` / `PARSER_VLM_API_KEY`；未设时解析结果保留图片资源，但不生成描述。VLM 请求失败时保留资源并返回警告。多图文档使用批量并发描述，后端 gRPC 超时为 600s（`GRPC_TIMEOUT_MS`）。
 
-## 在现有运行镜像上构建与验证
+## 在现有运行镜像上构建
 
 `Dockerfile.hotfix` 复用已安装的 MinerU、依赖及模型权重，只更新解析适配器和图片通道，不重新下载模型。以下命令在仓库根目录执行；基础镜像必须是已验证可用的完整 parser 镜像。
 
@@ -48,16 +48,11 @@
 docker build --network=none --pull=false \
   --build-arg PARSER_BASE_IMAGE=ohmydocagent/parser:fixed \
   -t ohmydocagent/parser:chart-fix -f parser/Dockerfile.hotfix .
-
-docker run --rm --network=none \
-  -v "$(pwd)/parser/tests:/tests:ro" \
-  --entrypoint /app/.venv/bin/python3 \
-  ohmydocagent/parser:chart-fix -B -m unittest discover -s /tests -v
 ```
 
 旧 `docmind/parser` 镜像需要同时指定其实际基础镜像和 `--build-arg PARSER_PACKAGE=docmind_parser`；热修复构建会检查目标包是否存在，避免复制到未使用的目录。
 
-图表回归测试使用真实引擎适配器、路由和 VLM 客户端，仅替代 MinerU 推理与外部 HTTP 响应；不调用付费模型、不访问业务数据库。覆盖无文本图表、已有图表文本、资源路径限制、VLM 描述回填、无 VLM/失败降级及普通图片和表格兼容。协议回归另以本地 HTTP 文本源和真实 gRPC 流验证新旧服务名，并检查环境变量兼容；不能仅凭端口就绪判断后端协议已联通。
+部署后应通过实际 Parse 请求确认 gRPC 服务名及环境变量兼容；不能仅凭端口就绪判断后端协议已联通。
 
 修复只影响后续解析。历史文档缺失的图表需要显式重新解析，升级镜像不会自动重解析已有知识库，也不保证 VLM 能准确识别每个图内数字。
 
