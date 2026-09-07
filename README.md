@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./assets/ohmydocagent.png" alt="OhMyDocAgent" width="620" />
 
-  <p><strong>把散落的文档整理成知识库，围绕资料提问，带着来源核对答案。</strong></p>
+  <p><strong>把散落在团队文档里的知识，整理成随时可问、可溯源、可推理的企业 AI 知识库。</strong></p>
 
   <p>
     <a href="http://ohmydocagent.xyz/">在线体验</a> ·
@@ -9,6 +9,16 @@
     <a href="#开始使用">开始使用</a> ·
     <a href="#常见问题">常见问题</a> ·
     <a href="https://github.com/C-H-001/ohmydocagent/issues">反馈问题</a>
+  </p>
+
+  <p>
+    <img src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white" alt="TypeScript 6" />
+    <img src="https://img.shields.io/badge/NestJS-12-E0234E?logo=nestjs&logoColor=white" alt="NestJS 12" />
+    <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=061A23" alt="React 19" />
+    <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11" />
+    <img src="https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
+    <img src="https://img.shields.io/badge/Neo4j-Graph-4581C3?logo=neo4j&logoColor=white" alt="Neo4j" />
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
   </p>
 </div>
 
