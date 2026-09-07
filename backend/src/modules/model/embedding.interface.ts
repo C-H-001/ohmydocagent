@@ -6,8 +6,7 @@
 export interface EmbeddingService {
   /**
    * 批量文本向量化。调用方保证 texts 非空；实现须对每个文本返回
-   * dimension 维向量（超出/不足维度会撞 PG vector(1024) 列约束 → 500，
-   * 真实模型接入时须与 embedding 列维度一致，见 chunk.entity.ts 注释）。
+   * 对应模型配置的向量；知识库的新入库与检索使用 EmbeddingProfileService。
    */
   embed(texts: string[], userId?: string): Promise<number[][]>;
 
@@ -18,19 +17,7 @@ export interface EmbeddingService {
     texts: string[],
     userId?: string,
   ): Promise<{ vectors: number[][]; totalTokens: number }>;
-
-  /** 向量维度（与 chunk.embedding 列的 vector(1024) 保持一致） */
-  readonly dimension: number;
 }
-
-/** 向量维度常量：与 chunk.entity embedding vector(1024) 列一致（见该列注释）。
- * 放在接口文件——dimension 是 EmbeddingService 契约的一部分（真实实现
- * 见 embedding.service.ts。
- *
- * 2026-08-29 调整为 1024：真实默认 embedding 模型「通义千问 qwen3.7-text-embedding」
- * 返回 1024 维（实测）。**维度必须与默认 embedding 模型匹配**——更换默认模型为
- * 不同维度时需 ALTER chunks.embedding 列 + 全量重新向量化（见 vector.service 注释）。 */
-export const EMBEDDING_DIMENSION = 1024;
 
 /** EmbeddingService 的 DI 令牌：Symbol 防字符串撞名（同 PARSER_CLIENT 约定） */
 export const EMBEDDING_SERVICE = Symbol('EMBEDDING_SERVICE');

@@ -28,9 +28,7 @@ async function main() {
   // 2. 真实向量化（通义千问 embedding）
   console.log('[2] 真实向量化 Qwen Embedding...');
   const vecs = await embed.embed(['OhMyDocAgent 企业知识工作台']);
-  console.log(
-    `    向量维度：${vecs[0]?.length ?? 0}（应为 ${embed.dimension}）`,
-  );
+  console.log(`    模型实际返回维度：${vecs[0]?.length ?? 0}`);
 
   console.log('[smoke] 真实模型链路全部通过');
   await app.close();

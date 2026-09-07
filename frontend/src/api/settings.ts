@@ -96,6 +96,7 @@ export interface ModelForm {
   modelName: string
   type: "chat" | "embedding" | "rerank"
   enabled?: boolean
+  extraConfig?: Record<string, unknown>
 }
 
 export const modelApi = {
@@ -297,6 +298,17 @@ export interface TrendDay {
   models: Record<string, TrendPoint>
 }
 
+function isTrendDay(value: unknown): value is TrendDay {
+  if (!value || typeof value !== "object") return false
+  const day = value as Partial<TrendDay>
+  if (typeof day.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day.date)
+    || !day.models || typeof day.models !== "object" || Array.isArray(day.models)) return false
+  return Object.values(day.models).every(point => point && typeof point === "object"
+    && typeof point.calls === "number" && Number.isFinite(point.calls) && point.calls >= 0
+    && typeof point.tokens === "number" && Number.isFinite(point.tokens) && point.tokens >= 0
+    && (point.name === undefined || typeof point.name === "string"))
+}
+
 export const usageApi = {
   /** GET /me/model-usage 当前用户自己的模型用量 */
   listMine(): Promise<{ items: ModelUsageRow[]; totalTokens: number; totalCalls: number }> {
@@ -304,7 +316,11 @@ export const usageApi = {
   },
 
   /** GET /me/model-usage/trend?days=N 用量趋势（近 N 天按日 per-model） */
-  trend(days = 30): Promise<TrendDay[]> {
-    return api.get("/me/model-usage/trend", { query: { days: String(days) } })
+  async trend(days = 30): Promise<TrendDay[]> {
+    const response = await api.get<{ items: unknown }>("/me/model-usage/trend", { query: { days: String(days) } })
+    if (!response || !Array.isArray(response.items) || !response.items.every(isTrendDay)) {
+      throw new Error("用量趋势数据格式异常，请稍后重试")
+    }
+    return response.items
   },
 }

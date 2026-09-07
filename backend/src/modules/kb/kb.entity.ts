@@ -45,9 +45,18 @@ export class KnowledgeBase {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   retrievalConfig: Record<string, unknown>;
 
-  /** 绑定的向量化模型 id：P1 未接入模型管理，恒为 null（Task 1.6 消费） */
+  /** 显式选择的私有向量模型；实际读写由不可变 profile 决定。 */
   @Column({ type: 'uuid', nullable: true })
   embeddingModelId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  activeEmbeddingProfileId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  pendingEmbeddingProfileId: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  previousEmbeddingProfileId: string | null;
 
   /**
    * 图谱抽取配置（Task 3.2）：{ enabled: boolean }——KB 级开关，默认开启

@@ -7,9 +7,11 @@ import re
 import httpx
 
 from .contracts import ParsedAsset
+from .prompts import CHART_DATA_PROMPT
 
 
 MIN_SIGNIFICANT_EMBEDDED_IMAGE_BYTES = 4096
+CHART_MAX_OUTPUT_TOKENS = 8192
 
 # ===== 图片体积/分辨率处理（多图批量优化） =====
 # 默认只做体积优化（PNG→JPEG/PNG 无损压缩），保持原始分辨率——表格/扫描/截图
@@ -124,7 +126,12 @@ class OpenAICompatibleVlmClient:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
 
-    def describe(self, content: bytes, *, mime_type: str) -> str:
+    def describe(
+        self, content: bytes, *, mime_type: str,
+        prompt: str = "Describe this document image concisely for retrieval.",
+        max_tokens: int | None = None,
+        require_complete: bool = False,
+    ) -> str:
         content, mime_type = _optimize_image(content, mime_type)
         encoded = base64.b64encode(content).decode("ascii")
         response = httpx.post(
@@ -138,7 +145,7 @@ class OpenAICompatibleVlmClient:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Describe this document image concisely for retrieval.",
+                                "text": prompt,
                             },
                             {
                                 "type": "image_url",
@@ -149,11 +156,14 @@ class OpenAICompatibleVlmClient:
                         ],
                     }
                 ],
+                **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             },
             timeout=self._timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()
+        if require_complete:
+            _reject_truncated_response(payload)
         try:
             content_value = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
@@ -164,6 +174,9 @@ class OpenAICompatibleVlmClient:
         self,
         images: list[tuple[bytes, str]],
         prompt: str = "Describe each document image concisely for retrieval.",
+        *,
+        max_tokens: int = 1024,
+        require_complete: bool = False,
     ) -> list[str]:
         """一次请求描述多张图：content 数组带 N 张图（优化后），要求模型按
         [1]..[N] 编号逐行输出 → 解析映射回列表（缺失项留空，调用方回退单张）。
@@ -197,18 +210,20 @@ class OpenAICompatibleVlmClient:
             json={
                 "model": self._model,
                 "messages": [{"role": "user", "content": content_parts}],
-                "max_tokens": 1024,
+                "max_tokens": max_tokens,
             },
             timeout=self._timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()
+        if require_complete:
+            _reject_truncated_response(payload)
         try:
             content_value = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
             raise ValueError("VLM response did not contain message content") from error
         text = _parse_vlm_message_content(content_value)
-        return _parse_numbered_descriptions(text, len(optimized))
+        return _parse_numbered_descriptions(text, len(optimized), strict=require_complete)
 
 
 def describe_asset(
@@ -218,7 +233,13 @@ def describe_asset(
     if client is None:
         return asset, None
     try:
-        description = client.describe(asset.content, mime_type=asset.mime_type)
+        if asset.source_type == "chart":
+            description = client.describe(
+                asset.content, mime_type=asset.mime_type, prompt=CHART_DATA_PROMPT,
+                max_tokens=CHART_MAX_OUTPUT_TOKENS, require_complete=True,
+            )
+        else:
+            description = client.describe(asset.content, mime_type=asset.mime_type)
     except Exception:
         return asset, f"VLM_DESCRIPTION_FAILED:{asset.asset_key}"
     return asset.model_copy(update={"description": description}), None
@@ -228,13 +249,31 @@ def is_significant_embedded_asset(asset: ParsedAsset) -> bool:
     return len(asset.content) >= MIN_SIGNIFICANT_EMBEDDED_IMAGE_BYTES
 
 
-def _parse_numbered_descriptions(text: str, expected: int) -> list[str]:
+def _reject_truncated_response(payload: dict) -> None:
+    if payload.get("choices") and payload["choices"][0].get("finish_reason") == "length":
+        raise ValueError("VLM response was truncated before chart extraction completed")
+
+
+def _parse_numbered_descriptions(text: str, expected: int, *, strict: bool = False) -> list[str]:
     """解析 [1]..[N] 编号输出 → 列表：
     - 按行正则 ^\s*\[(\d+)\]\s*(.*) 切分 → 编号→描述映射
     - 行数==expected 且无编号 → 按序兜底
     - 缺失编号留空（调用方回退单张）"""
     result: list[str] = [""] * expected
     if not text:
+        return result
+    if strict:
+        seen: set[int] = set()
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            match = re.fullmatch(r"\s*\[(\d+)\]\s*(.*)", line)
+            if not match or not 1 <= int(match[1]) <= expected or int(match[1]) in seen:
+                raise ValueError("Chart batch output has ambiguous image numbering or multiline data")
+            seen.add(int(match[1]))
+            result[int(match[1]) - 1] = match[2].strip()
+        # Parse strict records line by line: \s in the legacy regex can consume
+        # a newline after an empty [n] and attach the next image's data to it.
         return result
     numbered = re.findall(r"^\s*\[(\d+)\]\s*(.*)$", text, re.MULTILINE)
     if numbered:

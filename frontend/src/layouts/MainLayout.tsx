@@ -14,8 +14,6 @@ export default function MainLayout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const { user, logout } = useAuth()
   const displayName = user?.name || user?.email?.split("@")[0] || "用户"
-  const roleLabel =
-    user?.role === "super" ? "系统管理员" : user?.role === "member" ? "成员" : ""
 
   const handleLogout = async () => {
     setUserMenuOpen(false)
@@ -76,7 +74,6 @@ export default function MainLayout() {
               </div>
               <div className="flex-1 min-w-0 text-left">
                 <div className="text-xs font-semibold truncate">{displayName}</div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-mono">{roleLabel}</div>
               </div>
               <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform", userMenuOpen && "rotate-180")} />
             </button>

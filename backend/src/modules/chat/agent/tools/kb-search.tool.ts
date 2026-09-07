@@ -10,8 +10,8 @@
 //    重排；真实重排模型接入点同原管线注释）
 // 3. merge：检索 0 结果 → 跳过 merge（无引用，search_nothing 语义——
 //    返回「未找到相关内容」文案）；有结果 → 标题补查（批量 WHERE id IN，
-//    防 N+1）+ ReferencesService.build（同文档合并/[n] 编号/内容截断）→
-//    返回「编号 + 标题 + 摘要」文本（LLM 引用 [n] 的依据）+ references
+//    防 N+1）+ ReferencesService.build（同文档合并/[n] 编号/展示摘要）→
+//    buildContext 返回「编号 + 标题 + 完整片段」文本 + references
 //    数据（Agent 累积后随 assistant 落库，Task 2.6 引用系统不变）
 //
 // 失败语义（设计决策，见 tool.interface.ts 文件头）：检索失败 → status
@@ -194,19 +194,32 @@ export class KbSearchTool implements Tool {
         `查询理解失败，回退原始检索: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    const searchQueries = [query, ...expandedQueries.filter((q) => q && q !== query)].slice(0, 3);
-    // BYOK 一致性：query 嵌入须用与库相同的模型（KB 创建者的默认 embedding——
-    // 入库时按 knowledgeOwnerId 用创建者模型；若查询用访问者模型，共享 KB 下
-    // 维度/语义不一致导致检索失真）。取首个目标 KB 创建者（多 KB 同现状「取
-    // 首个配置」约定）；查不到（权限/异常）回退访问者自身。
-    const embedUserId = await this.kbOwnerId(scopeKbIds) ?? ctx.userId;
+    const searchQueries = [
+      query,
+      ...expandedQueries.filter((q) => q && q !== query),
+    ].slice(0, 3);
+    // 传当前访问者用于鉴权；VectorService 按各知识库的配置版本选择 embedding。
     let chunks: HybridSearchItem[] = [];
     try {
       const results = await Promise.all(
         searchQueries.map((q) =>
           scopeKnowledgeIds.length > 0
-            ? this.vectorService.hybridSearch(scopeKbIds, q, topK, scopeKnowledgeIds, retrieval.vectorThreshold, embedUserId)
-            : this.vectorService.hybridSearch(scopeKbIds, q, topK, undefined, retrieval.vectorThreshold, embedUserId),
+            ? this.vectorService.hybridSearch(
+                scopeKbIds,
+                q,
+                topK,
+                scopeKnowledgeIds,
+                retrieval.vectorThreshold,
+                ctx.userId,
+              )
+            : this.vectorService.hybridSearch(
+                scopeKbIds,
+                q,
+                topK,
+                undefined,
+                retrieval.vectorThreshold,
+                ctx.userId,
+              ),
         ),
       );
       // 合并去重：同一 chunk 出现在多路检索 → 分数取最高（多角度命中加分，
@@ -274,7 +287,10 @@ export class KbSearchTool implements Tool {
       chunks = chunks
         .slice(0, Math.min(topK * 2, 30))
         .map((c, i) => ({ c, r: byIndex.get(i) }))
-        .filter((x): x is { c: HybridSearchItem; r: NonNullable<typeof x.r> } => !!x.r)
+        .filter(
+          (x): x is { c: HybridSearchItem; r: NonNullable<typeof x.r> } =>
+            !!x.r,
+        )
         .sort((a, b) => b.r.score - a.r.score)
         .map((x) => x.c);
     }
@@ -298,12 +314,13 @@ export class KbSearchTool implements Tool {
     //   上下文得以补全（MergeExpand 语义）
     // - 合并：结果中通过 pre/next 链相邻的 chunk 合并为同一片段（内容拼接，
     //   引用定位主块——MergeOverlap/ParentResolve 的相邻合并语义）
-    chunks = await this.expandNeighbors(chunks, scopeKbIds, topK);
+    chunks = await this.expandNeighbors(chunks, topK);
     // 标题补查（批量 WHERE id IN，防 N+1——references 的 knowledgeTitle/url
     // 来源；仅 url 类型透传 sourceUrl，见 references.service.ts 注释）
     const knowledgeIds = [...new Set(chunks.map((c) => c.knowledgeId))];
     const knowledge = await this.knowledgeRepo.find({
       where: { id: In(knowledgeIds) },
+      select: { id: true, title: true, type: true, sourceUrl: true },
     });
     const sources = new Map(
       knowledge.map((k) => [
@@ -327,33 +344,16 @@ export class KbSearchTool implements Tool {
         }));
       }
     }
-    // 工具返回文本：编号 + 标题 + 摘要（LLM 引用 [n] 的依据——与系统提示
-    // 引用规则对应；references 数据由 Agent 累积后随 assistant 落库。
+    // 工具正文使用完整检索片段；references 只承载展示摘要与来源信息。
+    // 两者编号一致，references 数据由 Agent 累积后随 assistant 落库。
     // 注意：图谱检索已拆分为独立 search_graph 工具（hybrid→graph 工作流，
     // 不再在本工具内 RRF 融合——避免图谱噪声污染语义召回，见文件头注释）
-    const content = references
-      .map((r) => `[${r.index}] ${r.knowledgeTitle}：${r.content}`)
-      .join('\n');
+    const content = this.referencesService.buildContext(chunks, references);
     ctx.sse.send({ type: 'stage', stage: 'merge', status: 'done' });
     return { content, status: 'done', references };
   }
 
   /** 读 KB 检索配置（首个目标 KB；缺省默认——WeKnora 默认向量偏重） */
-  /** 目标 KB 创建者 id（query 嵌入用创建者模型——与入库一致，见 execute 注释）；
-   *  查不到返回 null（调用方回退访问者自身）。 */
-  private async kbOwnerId(kbIds: string[]): Promise<string | null> {
-    if (kbIds.length === 0) return null;
-    try {
-      const kb = await this.kbRepo.findOne({
-        where: { id: kbIds[0] },
-        select: { creatorId: true },
-      });
-      return kb?.creatorId ?? null;
-    } catch {
-      return null;
-    }
-  }
-
   private async loadRetrievalConfig(kbIds: string[]): Promise<{
     vectorThreshold: number;
   }> {
@@ -365,7 +365,9 @@ export class KbSearchTool implements Tool {
           select: { retrievalConfig: true },
         });
         cfg = kb?.retrievalConfig;
-      } catch { /* 配置读取失败用默认 */ }
+      } catch {
+        /* 配置读取失败用默认 */
+      }
     }
     return {
       vectorThreshold:
@@ -380,7 +382,10 @@ export class KbSearchTool implements Tool {
    * 一次 LLM 调用产出 { entities: 图谱实体名[], queries: 检索改写变体[] }。
    * 解析失败/上游错误 → 返回空（调用方回退原始检索，不阻断）。
    */
-  private async analyzeQuery(query: string, userId?: string): Promise<{
+  private async analyzeQuery(
+    query: string,
+    userId?: string,
+  ): Promise<{
     queries: string[];
   }> {
     try {
@@ -401,7 +406,11 @@ export class KbSearchTool implements Tool {
       const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
       const parsed = JSON.parse(json) as { queries?: unknown };
       const queries = Array.isArray(parsed.queries)
-        ? parsed.queries.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).slice(0, 2)
+        ? parsed.queries
+            .filter(
+              (q): q is string => typeof q === 'string' && q.trim().length > 0,
+            )
+            .slice(0, 2)
         : [];
       return { queries };
     } catch {
@@ -418,7 +427,6 @@ export class KbSearchTool implements Tool {
    */
   private async expandNeighbors(
     base: HybridSearchItem[],
-    kbIds: string[],
     maxChunks: number,
   ): Promise<HybridSearchItem[]> {
     if (base.length === 0) return base;
@@ -445,7 +453,10 @@ export class KbSearchTool implements Tool {
     let all = base;
     if (adjacentIds.size > 0) {
       const adjChunks = await this.chunkRepo.find({
-        where: { id: In([...adjacentIds]), kbId: In(kbIds) },
+        where: {
+          id: In([...adjacentIds]),
+          knowledgeId: In([...new Set(base.map((c) => c.knowledgeId))]),
+        },
         select: { id: true, content: true, kbId: true, knowledgeId: true },
       });
       const byId = new Map(adjChunks.map((c) => [c.id, c]));
@@ -484,8 +495,8 @@ export class KbSearchTool implements Tool {
         cur = nx.chunkId;
       }
       used.add(item.chunkId);
-      // 内容截断：合并片段总长上限（防超长喂 LLM，参考 ReferencesService 截断）
-      merged.push({ ...item, content: content.slice(0, 3000) });
+      // 保留合并片段全文；候选数量仍受 TopK 和相邻扩展范围约束。
+      merged.push({ ...item, content });
     }
     return merged.slice(0, maxChunks);
   }

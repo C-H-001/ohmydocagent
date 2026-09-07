@@ -18,6 +18,7 @@ import { UsageEvent } from '../modules/usage/usage-event.entity.js';
 import { Session } from '../modules/chat/session.entity.js';
 import { Message } from '../modules/chat/message.entity.js';
 import { Model } from '../modules/model/model.entity.js';
+import { EmbeddingProfile } from '../modules/model/embedding-profile.entity.js';
 import { KnowledgeBaseShare } from '../modules/kb-share/kb-share.entity.js';
 import { AuditLog } from '../modules/admin/audit/audit-log.entity.js';
 import { PlatformApiKey } from '../modules/admin/api-key/platform-api-key.entity.js';
@@ -25,6 +26,7 @@ import { SystemSetting } from '../modules/admin/settings/system-setting.entity.j
 
 /** 全部 TypeORM 实体列表（供 forRootAsync entities 与 forFeature 使用） */
 export const entities = [
+  EmbeddingProfile,
   ProbeEntity,
   User,
   ModelUsage,
@@ -51,6 +53,7 @@ export const entities = [
 ];
 
 export {
+  EmbeddingProfile,
   ProbeEntity,
   User,
   ModelUsage,

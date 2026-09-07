@@ -31,7 +31,10 @@ import type { Job } from 'bullmq';
 import { DataSource, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
-import { PARSER_CLIENT, type ParsedImage } from '../../parser/parser-client.interface.js';
+import {
+  PARSER_CLIENT,
+  type ParsedImage,
+} from '../../parser/parser-client.interface.js';
 import type {
   ParseInput,
   ParserClient,
@@ -40,20 +43,18 @@ import { ChunkService } from '../chunk/chunk.service.js';
 import { ChunkingService } from '../chunk/chunking.service.js';
 import type { ChunkingConfig, ChunkUnit } from '../chunk/chunking.service.js';
 import { KnowledgeBase } from '../kb/kb.entity.js';
-import { Knowledge, KnowledgeImageMeta } from '../knowledge/knowledge.entity.js';
+import {
+  Knowledge,
+  KnowledgeImageMeta,
+} from '../knowledge/knowledge.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 import { KnowledgeProgressService } from '../knowledge/knowledge-progress.service.js';
 import {
   PARSE_QUEUE,
-  EMBED_QUEUE,
   SUMMARY_QUEUE,
   addQueueJob,
 } from './parse-queue.constants.js';
-import type {
-  ParseJob,
-  EmbedJob,
-  SummaryJob,
-} from './parse-queue.constants.js';
+import type { ParseJob, SummaryJob } from './parse-queue.constants.js';
 import { GRAPH_QUEUE } from '../graph/graph-queue.constants.js';
 import type { GraphJob } from '../graph/graph-queue.constants.js';
 
@@ -77,10 +78,6 @@ export class ParseProcessor
     private readonly dataSource: DataSource,
     private readonly chunking: ChunkingService,
     private readonly chunkService: ChunkService,
-    // 向量化队列（Task 1.6）：分块落库成功后入队（见 enqueueEmbed 注释）。
-    // 队列在本模块注册（ParseModule 的 BullModule.registerQueue），
-    // EmbedProcessor 在本模块消费，与 PARSE_QUEUE 的注册/消费同模块内聚
-    @InjectQueue(EMBED_QUEUE) private readonly embedQueue: Queue<EmbedJob>,
     // 自动摘要队列（Task 1.7）：分块落库成功后入队（见 enqueueSummary 注释）。
     // SUMMARY_QUEUE 由 SummaryQueueModule 单点注册，两侧（KnowledgeModule/
     // ParseModule）import 复用——本模块 import SummaryQueueModule 注入同一
@@ -142,7 +139,8 @@ export class ParseProcessor
         manualContent: knowledge.manualContent ?? undefined,
         // 解析引擎：文档级 parserEngine 优先（覆盖全局 PARSER_ENGINE——
         // 上传时可选；归一化见 normalizeParserEngine，仅 mineru）
-        engine: (knowledge.parserEngine as 'mineru' | undefined) ??
+        engine:
+          (knowledge.parserEngine as 'mineru' | undefined) ??
           this.config.get('parserEngine'),
       };
       const parsed = await this.parser.parse(input);
@@ -255,7 +253,8 @@ export class ParseProcessor
     });
     // 文档级分块配置优先（覆盖 KB 级——用户需求「文档级别选择覆盖 KB 级」）；
     // 文档未设（null）→ 跟随 KB 配置；都缺省 → 默认配置
-    const docCfg = knowledge.chunkingConfig as Partial<ChunkingConfig> | null | undefined;
+    const docCfg = knowledge.chunkingConfig as
+      Partial<ChunkingConfig> | null | undefined;
     const units = this.chunking.chunk(
       parsedText,
       docCfg ?? (kb?.chunkingConfig as Partial<ChunkingConfig> | undefined),
@@ -300,6 +299,12 @@ export class ParseProcessor
       return;
     }
     await this.dataSource.transaction(async (manager) => {
+      // 全部写路径统一 KB → knowledge → chunk；KB 删除/配置切换亦先锁 KB。
+      const liveKb = await manager.query<Array<{ id: string }>>(
+        'SELECT id FROM knowledge_bases WHERE id=$1 FOR SHARE',
+        [knowledge.kbId],
+      );
+      if (!liveKb.length) throw new Error('知识库已删除，放弃分块');
       // 删除竞态复查（见方法头注释）：文档在解析期间被删除 → 抛错回滚，
       // 不插块（无孤儿）。原生 SQL FOR UPDATE（行锁）：与 remove 的事务化
       // 行删除互斥，任一时序都收敛到无孤儿块。knowledge 表名/列名 id 全小写
@@ -341,14 +346,7 @@ export class ParseProcessor
         manager,
       );
     });
-    // 分块落库成功后入队向量化（EMBED_QUEUE，Task 1.6）：按 knowledgeId 批量
-    // （一个文档的全部块一次向量化，减少队列条目——逐块入队会让每块一个 job，
-    // 大量块时队列膨胀且处理碎片化）。事务提交后才入队：保证入队时块已落库
-    // （EmbedProcessor 按 knowledgeId 查块，事务未提交查不到）。
-    // 文档 status=ready 与块向量化异步解耦：文档 ready ≠ 全部块已嵌入，检索只
-    // 查 indexStatus='ready' 的块（见 VectorService.searchVector 注释）——
-    // 此处不再阻塞等向量化完成，避免解析管线被向量化拖慢。
-    this.enqueueEmbed(knowledge.id);
+    // chunks 触发器已在同一事务中创建向量 outbox，由投递器可靠入队。
     // 分块成功后入队自动摘要（SUMMARY_QUEUE，Task 1.7）：此分支 units>0 →
     // parsedText 必然非空（决策：有 parsedText 才入队，见文件头注释）；
     // 与向量化并行异步，摘要缺失不影响文档 ready 可用（见 summary.processor.ts）
@@ -357,29 +355,6 @@ export class ParseProcessor
     // 上传即建图的产品核心能力（extractConfig 缺省默认开启）；enabled=false
     // 不入队（消费侧 ExtractProcessor 双保险，见 extract.processor.ts 注释）
     this.enqueueGraph(knowledge.id, kb?.extractConfig);
-  }
-
-  /** 入队向量化任务：载荷只带 knowledgeId（块内容由 worker 从 DB 读取）。
-   * job 级 attempts=2 + 指数退避（入队配置统一走 addQueueJob 单点，四处入队
-   * 共用，见 parse-queue.constants.ts 注释）；入队失败（Redis 抖动）不阻断
-   * 解析：块保持 processing，Task 1.9 提供向量化重试入口（TODO(P4.3) 任务
-   * 仪表盘一并覆盖）
-   *
-   * 不用 jobId: knowledgeId 去重（评估记录，Task 1.6 质量整改）：BullMQ 的
-   * 同 jobId 去重语义是「job key 存在即返回既有 job」（addStandardJob Lua 的
-   * handleDuplicatedJob，任何状态都命中，含 completed/failed）——而 completed
-   * job 的 key 在 removeOnComplete {count: 1000} 清理前一直存在；「同
-   * knowledgeId 重新入队」是正常业务流（reparse 删旧插新后新块需重新向量化、
-   * P4.3 手动重放），带 jobId 时新 embed job 会被旧 completed job 静默吞掉，
-   * 新块永远停在 processing（比并发双 job 的重复 embed 更糟）。故不做 jobId
-   * 去重：并发双 job 的重复 embed 由幂等语义兜底（worker 只处理 processing
-   * 块、upsert 幂等、失败仅标本次读取集合，见 embed.processor.ts 注释）。 */
-  private enqueueEmbed(knowledgeId: string): void {
-    addQueueJob(this.embedQueue, EMBED_QUEUE, {
-      knowledgeId,
-    } satisfies EmbedJob).catch((err: unknown) => {
-      this.logger.warn(`向量化任务入队失败: ${knowledgeId}`, err as Error);
-    });
   }
 
   /** 入队摘要任务（Task 1.7）：载荷只带 knowledgeId（正文由 worker 从 DB 读取）。

@@ -20,11 +20,14 @@ import { RerankService } from './rerank.service.js';
 import { LLMProviderFactory } from './providers/llm-provider.factory.js';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider.js';
 import { OllamaProvider } from './providers/ollama.provider.js';
+import { EmbeddingProfile } from './embedding-profile.entity.js';
+import { EmbeddingProfileService } from './embedding-profile.service.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Model])],
+  imports: [TypeOrmModule.forFeature([Model, EmbeddingProfile])],
   controllers: [ModelController],
   providers: [
+    EmbeddingProfileService,
     RerankService,
     // 模型管理核心
     ModelService,
@@ -38,6 +41,13 @@ import { OllamaProvider } from './providers/ollama.provider.js';
     { provide: CHAT_MODEL_SERVICE, useClass: ChatModelServiceImpl },
     { provide: EMBEDDING_SERVICE, useClass: EmbeddingServiceImpl },
   ],
-  exports: [EMBEDDING_SERVICE, CHAT_MODEL_SERVICE, CryptoService, ModelService, RerankService],
+  exports: [
+    EMBEDDING_SERVICE,
+    CHAT_MODEL_SERVICE,
+    CryptoService,
+    ModelService,
+    RerankService,
+    EmbeddingProfileService,
+  ],
 })
 export class ModelModule {}

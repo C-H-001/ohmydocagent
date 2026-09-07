@@ -102,7 +102,11 @@ interface RoundResult {
   text: string;
   reasoning?: string;
   toolCalls: StreamToolCall[];
-  usage?: { inputTokens?: number; outputTokens?: number; cacheHitTokens?: number };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheHitTokens?: number;
+  };
 }
 
 @Injectable()
@@ -221,7 +225,9 @@ export class AgentOrchestratorService {
     // 最后一块覆盖语义不变，见 chatRound；缺失字段按 0 计）。仅正常完成
     // 路径返回值携带（run 侧不持有——中断路径的 error generation_stopped
     // 事件无 usage 字段，见 run() 注释）
-    let usage: { inputTokens?: number; outputTokens?: number; cacheHitTokens?: number } | undefined;
+    let usage:
+      | { inputTokens?: number; outputTokens?: number; cacheHitTokens?: number }
+      | undefined;
     // abort 检查点：断连 → 返回已算出的结果（引用保留工具已返回的部分；
     // 编排器落库 partial assistant，见文件头断连注释）。不做 align——partial
     // 正文可能尚未出现 [n]，align 会误剔（同 Task 2.6 断连语义）
@@ -290,9 +296,12 @@ export class AgentOrchestratorService {
     // search_graph 图谱检索实体关系（解耦避免图谱噪声污染语义召回，见
     // graph-search.tool.ts 文件头）；工具顺序由系统提示编排（先 hybrid，
     // 实体/多跳问题再 graph）
-    const tools: Tool[] = kbIds.length > 0
-      ? [this.kbSearchTool, this.graphSearchTool]
-      : [];
+    const tools: Tool[] =
+      kbIds.length > 0 ||
+      !!searchScope?.kbIds?.length ||
+      !!searchScope?.knowledgeIds?.length
+        ? [this.kbSearchTool, this.graphSearchTool]
+        : [];
     const toolDefs: ToolDefinition[] = tools.map((t) => t.definition);
     const toolByName = new Map(tools.map((t) => [t.definition.name, t]));
 
@@ -355,7 +364,8 @@ export class AgentOrchestratorService {
           outputTokens:
             (usage?.outputTokens ?? 0) + (roundResult.usage.outputTokens ?? 0),
           cacheHitTokens:
-            (usage?.cacheHitTokens ?? 0) + (roundResult.usage.cacheHitTokens ?? 0),
+            (usage?.cacheHitTokens ?? 0) +
+            (roundResult.usage.cacheHitTokens ?? 0),
         };
       }
       // abort 检查点：chatStream 期间断连（chatRound 已返回已累积部分）
@@ -451,9 +461,14 @@ export class AgentOrchestratorService {
     let usage: RoundResult['usage'];
     // Langfuse：LLM generation span（挂会话 trace 下——parent 为编排器传入
     // 的 obsSpan；无 trace（历史/独立路径）→ 独立 generation 兜底）
-    const obsGen = await this.langfuse.generation(obsSpan ?? null, 'llm', messages, {
-      model: 'chat',
-    });
+    const obsGen = await this.langfuse.generation(
+      obsSpan ?? null,
+      'llm',
+      messages,
+      {
+        model: 'chat',
+      },
+    );
     try {
       for await (const chunk of this.chatModel.chatStream(messages, {
         signal,
@@ -565,9 +580,19 @@ export class AgentOrchestratorService {
       } else {
         // Langfuse：工具执行 span（挂会话 trace 下——input=args，end=结果
         // 摘要，UI 里 tool 调用与 LLM generation 同树可见耗时）
-        const obsTool = await this.langfuse.span(obsSpan ?? null, `tool:${call.name}`, args);
+        const obsTool = await this.langfuse.span(
+          obsSpan ?? null,
+          `tool:${call.name}`,
+          args,
+        );
         try {
-          result = await tool.execute(args, { sse, signal, kbIds, scope, userId });
+          result = await tool.execute(args, {
+            sse,
+            signal,
+            kbIds,
+            scope,
+            userId,
+          });
           obsTool.end({
             status: result.status,
             result: (result.content ?? '').slice(0, 500),
@@ -634,10 +659,10 @@ export class AgentOrchestratorService {
     if (kbIds.length > 0) {
       capabilities.push(
         '需要知识库内容/事实/引用片段时，先调用 search_kb 检索（返回 [n] 编号资料列表，回答标注引用 [n]）。' +
-        'search_kb 的 topK 参数可调：先从 k=8 开始检索；若结果不足以回答（多文档对比/跨页/需更多证据），' +
-        '逐步调大 topK（8 → 12 → 16 → 20）扩大保留候选——优先扩大 topK 而非更换查询词。' +
-        '当问题涉及实体间关系、跨文档实体关联或多跳推断（如"X 与 Y 的关系"、"与 X 相关的实体"）时，' +
-        '在 search_kb 之后再调用 search_graph 查询知识图谱补充实体网络（图谱信息单独呈现，不作 [n] 引用）。',
+          'search_kb 的 topK 参数可调：先从 k=8 开始检索；若结果不足以回答（多文档对比/跨页/需更多证据），' +
+          '逐步调大 topK（8 → 12 → 16 → 20）扩大保留候选——优先扩大 topK 而非更换查询词。' +
+          '当问题涉及实体间关系、跨文档实体关联或多跳推断（如"X 与 Y 的关系"、"与 X 相关的实体"）时，' +
+          '在 search_kb 之后再调用 search_graph 查询知识图谱补充实体网络（图谱信息单独呈现，不作 [n] 引用）。',
       );
     } else {
       capabilities.push(
@@ -682,14 +707,19 @@ export class AgentOrchestratorService {
           select: { memorySummary: true },
         });
         if (sess?.memorySummary) saved = JSON.parse(sess.memorySummary);
-      } catch { /* 解析失败按无记忆处理 */ }
+      } catch {
+        /* 解析失败按无记忆处理 */
+      }
       if (saved?.summary && (saved.count ?? 0) === outside.length) {
         return `\n[对话记忆] ${saved.summary}\n`;
       }
       if (signal.aborted) return '';
       // LLM 压缩窗口外历史（简短提示 → 一段摘要）
       const text = outside
-        .map((m) => `${m.role === 'user' ? '用户' : '助手'}: ${m.content.slice(0, 200)}`)
+        .map(
+          (m) =>
+            `${m.role === 'user' ? '用户' : '助手'}: ${m.content.slice(0, 200)}`,
+        )
         .join('\n');
       if (text.length === 0) return '';
       const summary = await this.chatModel.chat(
@@ -705,9 +735,11 @@ export class AgentOrchestratorService {
         userId,
       );
       if (summary) {
-        await this.sessionRepo.update(sessionId, {
-          memorySummary: JSON.stringify({ summary, count: outside.length }),
-        }).catch(() => {});
+        await this.sessionRepo
+          .update(sessionId, {
+            memorySummary: JSON.stringify({ summary, count: outside.length }),
+          })
+          .catch(() => {});
       }
       return summary ? `\n[对话记忆] ${summary}\n` : '';
     } catch (err) {

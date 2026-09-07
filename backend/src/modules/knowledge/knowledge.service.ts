@@ -120,6 +120,7 @@ const LIST_SELECT: FindOptionsSelect<Knowledge> = {
   fileSize: true,
   sourceUrl: true,
   chunkCount: true,
+  tokenCost: true,
   createdAt: true,
   updatedAt: true,
 };

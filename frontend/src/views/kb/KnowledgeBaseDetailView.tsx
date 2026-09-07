@@ -29,6 +29,7 @@ import {
 } from "lucide-react"
 import { cn, toast } from "../../components/ui"
 import PdfReader from "../../components/PdfReader"
+import EmbeddingSettings from "./EmbeddingSettings"
 import { api, ApiError, BASE_URL, getAccessToken } from "../../api/client"
 import {
   chunkApi, folderApi, kbApi, knowledgeApi, tagApi, shareApi,
@@ -2157,7 +2158,7 @@ function BatchTagModal({ tags, onClose, onSubmit }: {
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-[480px] p-6">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-[480px] max-h-[90vh] overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold">{title}</h2>
           <button onClick={onClose} className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
@@ -2171,9 +2172,10 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
 }
 
 // ─── KB 设置（基本信息 → PUT /kbs/:id） ─────────────────────────────────────
-type SettingsTabKey = "info" | "chunking" | "retrieval" | "shares"
+type SettingsTabKey = "info" | "chunking" | "retrieval" | "shares" | "embedding"
 const SETTINGS_TABS = (kb: KnowledgeBase): { key: SettingsTabKey; label: string }[] => [
   { key: "info", label: "基本信息" },
+  { key: "embedding", label: "向量配置" },
   ...(kb.myPermission === "full"
     ? [
         { key: "chunking" as SettingsTabKey, label: "分块配置" },
@@ -2204,7 +2206,7 @@ function KbSettingsModal({ kb, initialTab, onClose }: { kb: KnowledgeBase; initi
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab ?? "info")
 
   const save = async () => {
-    if (saving || !name.trim()) return
+    if (saving || !name.trim() || activeTab === "embedding") return
     setSaving(true)
     try {
       await kbApi.getKb(kb.id) // 预热：详情路由权限（无实际副作用）
@@ -2239,7 +2241,7 @@ function KbSettingsModal({ kb, initialTab, onClose }: { kb: KnowledgeBase; initi
     <ModalShell title={`知识库设置 · ${kb.name}`} onClose={onClose}>
       {/* 设置页签：基本信息 / 共享管理（成员管理仅 KB Owner/系统 super 可见，
       普通成员 view/edit/admin 不展示该入口——用户需求，避免点击后 403） */}
-      <div className="flex gap-0 border-b border-border -mx-5 px-5 mb-4">
+      <div className="flex flex-wrap gap-0 border-b border-border -mx-5 px-5 mb-4">
         {SETTINGS_TABS(kb).map(tab => (
           <button
             key={tab.key}
@@ -2355,17 +2357,18 @@ function KbSettingsModal({ kb, initialTab, onClose }: { kb: KnowledgeBase; initi
       )}
 
       {activeTab === "shares" && <KbSharesPanel kbId={kb.id} />}
+      {activeTab === "embedding" && <EmbeddingSettings key={kb.id} kbId={kb.id} creatorId={kb.creatorId} permission={kb.myPermission} />}
 
       <div className="flex justify-end gap-2 mt-4">
-        <button onClick={onClose} className="h-9 px-4 text-sm border border-border rounded-md hover:bg-muted transition-colors">取消</button>
-        <button
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-border rounded-md hover:bg-muted transition-colors">{activeTab === "embedding" ? "关闭" : "取消"}</button>
+        {activeTab !== "embedding" && <button
           onClick={save}
           disabled={saving || !name.trim() || activeTab === "shares"}
           className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
         >
           {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           保存
-        </button>
+        </button>}
       </div>
     </ModalShell>
   )
@@ -2492,4 +2495,3 @@ function KbSharesPanel({ kbId }: { kbId: string }) {
     </div>
   )
 }
-

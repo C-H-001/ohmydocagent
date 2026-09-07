@@ -52,4 +52,5 @@ ENTRYPOINT ["/app/.venv/bin/ohmydocagent-parser"]
 
 # VLM 描述并发（多图文档串行超时 → ThreadPool 并发 4；放预热后——增量
 # 构建命中缓存，只重建本层）
-COPY router.py /app/src/ohmydocagent_parser/router.py
+COPY parser/router.py parser/media.py parser/server.py parser/contracts.py parser/prompts.py /app/src/ohmydocagent_parser/
+COPY parser/engines/mineru_engine.py /app/src/ohmydocagent_parser/engines/mineru_engine.py

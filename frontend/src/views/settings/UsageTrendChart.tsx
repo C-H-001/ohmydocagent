@@ -51,12 +51,16 @@ export function UsageTrendChart() {
   const [rows, setRows] = useState<TrendDay[]>([])
   const [loading, setLoading] = useState(true)
   const [models, setModels] = useState<TrendModel[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   // 拉取趋势（范围变化时）
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
+    setError(null)
     usageApi.trend(rangeDays).then((items) => {
-      setRows(items)
+      if (cancelled) return
       // 模型动态收集（按首次出现顺序）
       const seen: Record<string, string> = {}
       for (const day of items) {
@@ -64,6 +68,7 @@ export function UsageTrendChart() {
           if (!(id in seen) && pt.name) seen[id] = pt.name
         }
       }
+      setRows(items)
       setModels(prev => {
         const ids = Object.keys(seen)
         const next = ids.map((id, i) => {
@@ -72,9 +77,16 @@ export function UsageTrendChart() {
         })
         return next
       })
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [rangeDays])
+    }).catch((err: unknown) => {
+      if (cancelled) return
+      setRows([])
+      setModels([])
+      setError(err instanceof Error ? err.message : "用量趋势加载失败，请稍后重试")
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [rangeDays, reloadKey])
 
   const activeModels = models.filter(m => m.on)
   const allOn = models.length > 0 && activeModels.length === models.length
@@ -111,6 +123,15 @@ export function UsageTrendChart() {
 
   if (loading) {
     return <div className="py-8 text-center text-sm text-muted-foreground">趋势加载中…</div>
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-border bg-card p-5 text-sm">
+        <span>用量趋势加载失败：{error}</span>
+        <button className="shrink-0 underline" onClick={() => setReloadKey(key => key + 1)}>重试</button>
+      </div>
+    )
   }
 
   return (

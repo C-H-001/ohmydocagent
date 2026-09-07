@@ -31,6 +31,7 @@ import { SummaryQueueModule } from './summary-queue.module.js';
 import { ParseProcessor } from './parse.processor.js';
 
 import { StorageModule } from '../storage/storage.module.js';
+import { EmbeddingJobDispatcher } from './embedding-job-dispatcher.service.js';
 
 @Module({
   imports: [
@@ -59,6 +60,11 @@ import { StorageModule } from '../storage/storage.module.js';
     // Knowledge（存在性校验），需在本模块注册实体
     TypeOrmModule.forFeature([Knowledge, KnowledgeBase]),
   ],
-  providers: [ParseProcessor, EmbedProcessor, SummaryProcessor],
+  providers: [
+    ParseProcessor,
+    EmbedProcessor,
+    SummaryProcessor,
+    EmbeddingJobDispatcher,
+  ],
 })
 export class ParseModule {}

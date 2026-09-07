@@ -7,8 +7,8 @@
  * - index 为 [n] 编号：build 时按文档首次出现顺序 1..N 分配（与系统提示中的
  *   [n] 一一对应）；align 剔除未引用项后**保留原文编号不重映射**——正文已含
  *   [n] 无法改写，前端按 index 匹配（语义见 references.service.ts 注释）
- * - content 为分块内容（build 时截断到 REFERENCE_CONTENT_MAX_LENGTH=200，
- *   前端悬浮摘要与 prompt 共用一份截断后的内容，见 references.service.ts 注释）
+ * - content 为主分块的展示摘要（最多 200 字符 + 省略号）；模型上下文由
+ *   buildContext 从完整已选分块独立构建，不使用该摘要。
  * - chunks 为同文档合并时保留的全部位置（score 降序；前端点击引用可定位到
  *   同文档各块）；单块文档也为单元素数组（前端处理统一）
  * - url 仅 URL 导入类型文档有值（sourceUrl 透传，补查 knowledge 表获取） */

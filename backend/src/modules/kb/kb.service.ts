@@ -42,6 +42,7 @@ import { KbAccessService } from '../kb-share/kb-access.service.js';
 import { UserKbFavorite } from './user-kb-favorite.entity.js';
 import { UserKbPin } from './user-kb-pin.entity.js';
 import { UserKbRecent } from './user-kb-recent.entity.js';
+import { EmbeddingProfileService } from '../model/embedding-profile.service.js';
 
 /** 列表单条记录：知识库字段 + 当前用户视角 pinned/favorite 标记 + 聚合计数 */
 export interface KbListItem extends KnowledgeBase {
@@ -96,13 +97,19 @@ export class KbService {
     private readonly graph: GraphRepository,
     // Task 4.4 审计（全局模块直接注入，见 audit.module.ts 注释）
     private readonly audit: AuditService,
+    private readonly embeddingProfiles: EmbeddingProfileService,
   ) {}
 
   /** 创建知识库：creatorId=当前用户，type 固定 document，分块配置默认空对象，
    * 图谱抽取配置默认开启（{ enabled: true }——上传即建图的产品核心能力，
    * 显式 { enabled: false } 关闭，见 kb.entity.ts extractConfig 注释） */
   async create(dto: CreateKbDto, userId: string): Promise<KnowledgeBase> {
+    const profile = dto.embeddingModelId
+      ? await this.embeddingProfiles.createProfile(dto.embeddingModelId, userId)
+      : null;
     const kb = this.kbRepository.create({
+      embeddingModelId: profile?.modelId ?? null,
+      activeEmbeddingProfileId: profile?.id ?? null,
       name: dto.name,
       description: dto.description ?? '',
       type: 'document',
@@ -115,6 +122,12 @@ export class KbService {
       }) as Record<string, unknown>,
     });
     const saved = await this.kbRepository.save(kb);
+    if (profile) {
+      await this.dataSource.query(
+        'INSERT INTO embedding_jobs ("kbId","profileId") VALUES ($1,$2)',
+        [saved.id, profile.id],
+      );
+    }
     // 审计：创建知识库
     await this.audit.log('kb.create', userId, 'kb', saved.id, {
       name: saved.name,
@@ -332,6 +345,10 @@ export class KbService {
   async remove(id: string): Promise<void> {
     const kb = await this.getById(id); // 404 语义（不存在/非法 id 都先于任何删除动作暴露）
     await this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT id FROM knowledge_bases WHERE id=$1 FOR UPDATE',
+        [id],
+      );
       await manager.delete(UserKbPin, { kbId: id });
       await manager.delete(UserKbFavorite, { kbId: id });
       await manager.delete(UserKbRecent, { kbId: id });
@@ -479,7 +496,9 @@ export class KbService {
       type: source.type,
       creatorId: userId,
       chunkingConfig: source.chunkingConfig,
-      embeddingModelId: source.embeddingModelId,
+      // 跨用户复制配置不得继承源用户的私人模型凭据或向量配置。
+      embeddingModelId:
+        source.creatorId === userId ? source.embeddingModelId : null,
       // Task 3.2：图谱抽取开关随配置复制（副本默认继承源开关语义）
       extractConfig: source.extractConfig,
     });

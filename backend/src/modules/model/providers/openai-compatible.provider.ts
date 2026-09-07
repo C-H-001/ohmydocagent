@@ -66,7 +66,10 @@ function isRetryableStatus(status: number): boolean {
 
 /** 指数退避延迟（ms）：2^(attempt-1) * base，上限 cap */
 function backoffDelay(attempt: number): number {
-  return Math.min(LLM_BACKOFF_CAP_MS, Math.pow(2, attempt - 1) * LLM_BACKOFF_BASE_MS);
+  return Math.min(
+    LLM_BACKOFF_CAP_MS,
+    Math.pow(2, attempt - 1) * LLM_BACKOFF_BASE_MS,
+  );
 }
 
 /**
@@ -441,7 +444,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const cachedHit =
             typeof json.usage.prompt_cache_hit_tokens === 'number'
               ? json.usage.prompt_cache_hit_tokens
-              : typeof json.usage.prompt_tokens_details?.cached_tokens === 'number'
+              : typeof json.usage.prompt_tokens_details?.cached_tokens ===
+                  'number'
                 ? json.usage.prompt_tokens_details.cached_tokens
                 : undefined;
           yield {
@@ -480,6 +484,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     texts: string[],
     model?: string,
   ): Promise<{ vectors: number[][]; totalTokens: number }> {
+    if (texts.length === 0) return { vectors: [], totalTokens: 0 };
     const config = this.requireConfig();
     // SSRF 防护：同 chat（见该处注释与 ssrf.guard.ts）
     await assertSafeBaseUrl(config.baseUrl);
@@ -497,6 +502,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
         body: JSON.stringify({
           model: model ?? config.modelName,
           input: texts,
+          ...(config.supportsDimensionOverride === true &&
+          config.embeddingDimensions !== undefined
+            ? { dimensions: config.embeddingDimensions }
+            : {}),
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
@@ -509,16 +518,46 @@ export class OpenAICompatibleProvider implements LLMProvider {
       throw new Error(`供应商请求失败（HTTP ${res.status}）: ${detail}`);
     }
     const data = parseJsonBody(await res.text()) as {
-      data?: Array<{ embedding?: number[] }>;
+      data?: Array<{ embedding?: unknown; index?: unknown } | null>;
       usage?: { total_tokens?: number };
-    };
-    if (!Array.isArray(data.data)) {
+    } | null;
+    if (!Array.isArray(data?.data)) {
       throw new Error('供应商响应缺少 data 数组（格式异常）');
     }
-    // fail-fast：缺向量/空向量/批内维度不一致 → 格式错误（不静默返回空数组——
-    // 空向量会污染向量索引，静默吞掉会让错误在索引层爆炸）
-    const vectors = data.data.map((d) => d.embedding);
-    const firstDim = vectors.find((v) => Array.isArray(v))?.length;
+    if (data.data.length !== texts.length) {
+      throw new Error(
+        `供应商响应向量数量不一致（期望 ${texts.length}，收到 ${data.data.length}，格式异常）`,
+      );
+    }
+    // 部分兼容端点省略全部 index；一旦出现 index，必须全量唯一且覆盖输入。
+    const indexed = data.data.some(
+      (entry) =>
+        entry != null && Object.prototype.hasOwnProperty.call(entry, 'index'),
+    );
+    const vectors: unknown[] = Array.from({ length: texts.length });
+    const seen = new Set<number>();
+    for (let i = 0; i < data.data.length; i++) {
+      const entry = data.data[i];
+      let position = i;
+      if (indexed) {
+        const index = entry?.index;
+        if (
+          typeof index !== 'number' ||
+          !Number.isInteger(index) ||
+          index < 0 ||
+          index >= texts.length ||
+          seen.has(index)
+        ) {
+          throw new Error(
+            '供应商响应 index 索引必须全量、唯一且在输入范围内（格式异常）',
+          );
+        }
+        seen.add(index);
+        position = index;
+      }
+      vectors[position] = entry?.embedding;
+    }
+    let firstDim: number | undefined;
     for (let i = 0; i < vectors.length; i++) {
       const v = vectors[i];
       if (!Array.isArray(v) || v.length === 0) {
@@ -526,13 +565,36 @@ export class OpenAICompatibleProvider implements LLMProvider {
           `供应商响应第 ${i} 个向量缺失或为空（格式异常，期望 ${texts.length} 个向量）`,
         );
       }
-      if (firstDim !== undefined && v.length !== firstDim) {
+      firstDim ??= v.length;
+      if (v.length !== firstDim) {
         throw new Error(
           `供应商响应向量维度不一致（第 ${i} 个 ${v.length} 维，首个 ${firstDim} 维，格式异常）`,
         );
       }
+      if (
+        config.embeddingDimensions !== undefined &&
+        v.length !== config.embeddingDimensions
+      ) {
+        throw new Error(
+          `供应商响应向量维度不符合配置（第 ${i} 个 ${v.length} 维，期望 ${config.embeddingDimensions} 维）`,
+        );
+      }
+      if (
+        !v.every(
+          (value: unknown) =>
+            typeof value === 'number' && Number.isFinite(value),
+        )
+      ) {
+        throw new Error(`供应商响应第 ${i} 个向量含非有限数值（格式异常）`);
+      }
+      if (!v.some((value: number) => value !== 0)) {
+        throw new Error(`供应商响应第 ${i} 个向量为零向量（格式异常）`);
+      }
     }
-    return { vectors: vectors as number[][], totalTokens: data.usage?.total_tokens ?? 0 };
+    return {
+      vectors: vectors as number[][],
+      totalTokens: data.usage?.total_tokens ?? 0,
+    };
   }
 
   /**
@@ -577,10 +639,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
         return { ok: true };
       }
       // chat（默认）：最小对话请求
-      await p.chat(
-        [{ role: 'user', content: 'ping' }],
-        { maxTokens: 1, temperature: 0 },
-      );
+      await p.chat([{ role: 'user', content: 'ping' }], {
+        maxTokens: 1,
+        temperature: 0,
+      });
       return { ok: true };
     } catch (err) {
       // 测试语义：错误作为结果返回（前端展示），不抛异常

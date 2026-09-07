@@ -5,21 +5,15 @@
 // ChatModelServiceImpl，见 chat-model.service.ts 注释）。
 //
 //
-// dimension：**读取 EMBEDDING_DIMENSION（1024）**——与 chunk.entity embedding vector(1024)
-// 列一致（pgvector 列维度在 DDL 定死，改列要 migration）。真实模型维度
-// 若不同（如 OpenAI text-embedding-3-large=3072），需同步改列维度 + 本常量
-// （Task 后续按需加 dimension 配置项，见任务书决策）。
+// 仅供未迁移知识库的兼容读取和模型诊断；新向量读写由知识库 profile 决定，
+// 不再声明全局维度，也不将用户默认模型当作已绑定知识库的模型。
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type { EmbeddingService } from './embedding.interface.js';
-import { EMBEDDING_DIMENSION } from './embedding.interface.js';
 import { ModelService } from './model.service.js';
 import { LLMProviderFactory } from './providers/llm-provider.factory.js';
 
 @Injectable()
 export class EmbeddingServiceImpl implements EmbeddingService {
-  /** 向量维度：与 chunk.entity embedding vector(1024) 列一致（见文件头注释） */
-  readonly dimension = EMBEDDING_DIMENSION;
-
   constructor(
     private readonly modelService: ModelService,
     private readonly factory: LLMProviderFactory,
@@ -53,6 +47,9 @@ export class EmbeddingServiceImpl implements EmbeddingService {
     if (provider.embedWithUsage) {
       return provider.embedWithUsage(texts, model.modelName);
     }
-    return { vectors: await provider.embed(texts, model.modelName), totalTokens: 0 };
+    return {
+      vectors: await provider.embed(texts, model.modelName),
+      totalTokens: 0,
+    };
   }
 }

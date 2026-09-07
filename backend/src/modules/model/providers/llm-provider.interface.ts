@@ -23,6 +23,10 @@ export interface ProviderConnectionConfig {
   apiKey: string;
   /** 上游模型 ID（如 deepseek-chat / qwen2.5:7b） */
   modelName: string;
+  /** 期望的 embedding 输出维度（1..4000）；独立于上游维度覆盖能力 */
+  embeddingDimensions?: number;
+  /** 仅显式 true 且指定 embeddingDimensions 时才请求上游覆盖维度 */
+  supportsDimensionOverride?: boolean;
 }
 
 /** chat() 业务选项：采样参数（透传给供应商）+ 可选覆盖模型 ID */
@@ -56,7 +60,11 @@ export interface ChatStreamChunk {
   text: string;
   reasoning?: string;
   toolCalls?: Array<{ id: string; name: string; arguments: string }>;
-  usage?: { inputTokens?: number; outputTokens?: number; cacheHitTokens?: number };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheHitTokens?: number;
+  };
 }
 
 export interface LLMProvider {

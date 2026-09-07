@@ -25,7 +25,8 @@ export interface ParseJob {
  * - { chunkId }：单块重新向量化（Task 1.9 编辑/回滚后入队——编辑场景块少，
  *   显式 chunkId 载荷语义自明，不依赖「编辑后无其他 processing 块」的隐式
  *   前提，见 ChunkService.enqueueSingleEmbed 注释） */
-export type EmbedJob = { knowledgeId: string } | { chunkId: string };
+export type EmbedJob =
+  { knowledgeId: string } | { chunkId: string } | { embeddingJobId: string };
 
 /** 摘要任务载荷（Task 1.7）：只携带 knowledgeId——正文由 worker 从 DB 读取
  * （同 ParseJob 载荷最小化约定，见文件头注释） */

@@ -24,7 +24,7 @@ import { entities } from './entities.js';
         // 每连接初始化时应用（pg 连接 options GUC），ef_search 越大召回越全、
         // 延迟越高（默认 40，见 hnsw.index 注释）
         extra: {
-          options: `-c hnsw.ef_search=${config.get('database.hnswEfSearch') ?? 40}`,
+          options: `-c hnsw.ef_search=${config.get('hnswEfSearch') ?? 40}`,
         },
       }),
     }),

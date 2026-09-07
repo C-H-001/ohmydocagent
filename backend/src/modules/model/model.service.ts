@@ -30,13 +30,14 @@
 //   「模型调试」直接展示；与 testConnection 的最小 1-token 请求区分）
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
 import { AuditService } from '../admin/audit/audit.service.js';
-import { Role, User } from '../users/user.entity.js';
+import { Role } from '../users/user.entity.js';
 import { CryptoService } from './crypto.service.js';
 import { CreateModelDto } from './dto/create-model.dto.js';
 import { UpdateModelDto } from './dto/update-model.dto.js';
@@ -116,7 +117,10 @@ export class ModelService {
   }
 
   /** 新增模型：加密 apiKey + provider 默认值；返回脱敏视图（201） */
-  async create(dto: CreateModelDto, userId?: string | null): Promise<ModelView> {
+  async create(
+    dto: CreateModelDto,
+    userId?: string | null,
+  ): Promise<ModelView> {
     // openai-compatible 必填 baseUrl：DTO 层 @IsUrl 只校验格式，这里拦「缺省」
     // （ollama 可留空 → 下方填默认 127.0.0.1:11434；openai-compatible 空 baseUrl
     // 无法路由，fail-fast 而不是等连通性测试/实际调用才暴露）
@@ -141,6 +145,7 @@ export class ModelService {
       // BYOK：用户私有模型（userId=null = 全局，super 配置兜底）
       userId: userId ?? null,
     });
+    this.validateEmbeddingOptions(entity);
     const saved = await this.repo.save(entity);
     // 审计：创建模型（不记 apiKey 相关字段）
     await this.audit.log('model.create', null, 'model', saved.id, {
@@ -152,7 +157,11 @@ export class ModelService {
   }
 
   /** 列表（按 type 可选筛选）：全量返回（模型数量有限不分页，见 DTO 注释） */
-  async list(type?: ModelType, userId?: string, role?: string): Promise<ModelView[]> {
+  async list(
+    type?: ModelType,
+    userId?: string,
+    role?: string,
+  ): Promise<ModelView[]> {
     // BYOK：返回「我的模型 + 全局模型」（super 配置兜底——聊天/检索路由
     // 用户私有优先、全局兜底，见 getDefault）；super 额外可见全部全局
     // BYOK：只返回自己的模型（平台不提供全局默认——参考 WeKnora 用户自配）
@@ -167,7 +176,11 @@ export class ModelService {
   }
 
   /** 详情：脱敏视图；不存在 → 404 */
-  async getById(id: string, userId?: string, role?: string): Promise<ModelView> {
+  async getById(
+    id: string,
+    userId?: string,
+    role?: string,
+  ): Promise<ModelView> {
     return this.sanitize(await this.requireModel(id, userId, role));
   }
 
@@ -180,6 +193,16 @@ export class ModelService {
   ): Promise<ModelView> {
     const model = await this.requireModel(id, userId, role);
     const oldType = model.type;
+    const nextExtra = dto.extraConfig ?? model.extraConfig;
+    const spaceChanged =
+      (dto.type !== undefined && dto.type !== model.type) ||
+      (dto.provider !== undefined && dto.provider !== model.provider) ||
+      (dto.baseUrl !== undefined && dto.baseUrl !== model.baseUrl) ||
+      (dto.modelName !== undefined && dto.modelName !== model.modelName) ||
+      nextExtra.dimensions !== model.extraConfig.dimensions ||
+      nextExtra.supportsDimensionOverride !==
+        model.extraConfig.supportsDimensionOverride;
+    if (spaceChanged) await this.assertNoEmbeddingProfiles(id);
     // type 变更 + 本行是默认 → 目标 type 已有默认则清除本行 isDefault：
     // 否则「改 type 保留默认」会撞部分唯一索引 idx_models_default_type → 23505
     // 裸 500。选「清除」而非「400 拒绝」——与删除默认模型语义一致（改 type
@@ -204,6 +227,7 @@ export class ModelService {
     if (dto.type !== undefined) model.type = dto.type;
     if (dto.enabled !== undefined) model.enabled = dto.enabled;
     if (dto.extraConfig !== undefined) model.extraConfig = dto.extraConfig;
+    this.validateEmbeddingOptions(model);
     const saved = await this.repo.save(model);
     // getDefault 缓存失效：旧/新 type 都删（enabled/isDefault/type 可能都变了）
     this.invalidateDefault(oldType, saved.userId);
@@ -214,9 +238,10 @@ export class ModelService {
   /** 删除：允许删除默认模型（删除即该 type 无默认，见文件头设计决策） */
   async remove(id: string, userId?: string, role?: string): Promise<void> {
     const model = await this.requireModel(id, userId, role);
+    await this.assertNoEmbeddingProfiles(id);
     await this.repo.delete(id);
     // getDefault 缓存失效：默认模型被删 = 该 type 无默认
-    this.defaultCache.delete(model.type);
+    this.invalidateDefault(model.type, model.userId);
     // 审计：删除模型
     await this.audit.log('model.delete', null, 'model', id, {
       name: model.name,
@@ -231,7 +256,12 @@ export class ModelService {
    * 的事务在串行化后结果确定：后提交者胜，符合预期）；重试仍冲突则抛
    * ConflictException（异常竞争，不应发生）。
    */
-  async setDefault(id: string, userId?: string, role?: string): Promise<ModelView> {
+  async setDefault(
+    id: string,
+    userId?: string,
+    role?: string,
+  ): Promise<ModelView> {
+    await this.requireModel(id, userId, role);
     for (let attempt = 0; ; attempt++) {
       try {
         const model = await this.dataSource.transaction(async (em) => {
@@ -255,7 +285,10 @@ export class ModelService {
         });
         // getDefault 缓存：直接写入新默认（比 delete 再查省一次查库；
         // model 已通过 enabled + isDefault=true 校验，符合 getDefault 条件）
-        this.defaultCache.set(`${model.type}:${model.userId ?? 'global'}`, model);
+        this.defaultCache.set(
+          `${model.type}:${model.userId ?? 'global'}`,
+          model,
+        );
         // 审计：默认模型变更
         await this.audit.log('model.set_default', null, 'model', id, {
           name: model.name,
@@ -272,7 +305,10 @@ export class ModelService {
 
   /** 路由用：该 type 的默认模型（isDefault && enabled），无则 null。
    * 内存缓存命中直接返回（热路径查库优化，见 defaultCache 注释） */
-  async getDefault(type: ModelType, userId?: string | null): Promise<Model | null> {
+  async getDefault(
+    type: ModelType,
+    userId?: string | null,
+  ): Promise<Model | null> {
     // BYOK（参考 WeKnora：租户/用户自己配模型，平台不提供默认兜底）：
     // 只查用户私有默认；无 userId（调用方未传归属）或未配置 → null
     // （ChatModelService/EmbeddingService 抛 503 提示用户配置）
@@ -293,6 +329,28 @@ export class ModelService {
     this.defaultCache.delete(`${type}:${userId ?? 'global'}`);
   }
 
+  private async assertNoEmbeddingProfiles(modelId: string): Promise<void> {
+    const rows = await this.dataSource.query(
+      'SELECT id FROM embedding_profiles WHERE "modelId"=$1 LIMIT 1',
+      [modelId],
+    );
+    if (rows.length)
+      throw new ConflictException(
+        '该模型已被向量配置引用。请新增模型并重建知识库后切换；当前模型可更新凭据',
+      );
+  }
+
+  private validateEmbeddingOptions(model: Model): void {
+    if (model.type !== 'embedding') return;
+    try {
+      this.factory.create(model);
+    } catch {
+      throw new BadRequestException(
+        '向量维度须为 1～4000 的整数，维度覆盖开关须与供应商能力一致',
+      );
+    }
+  }
+
   /** 连通性测试（POST /models/test）：请求体完整配置直传，不落库 */
   async testConnection(dto: TestModelDto): Promise<TestConnectionResult> {
     const config: ProviderConnectionConfig = {
@@ -304,7 +362,11 @@ export class ModelService {
   }
 
   /** 已保存模型连通性测试（POST /models/:id/test）：解密 key 后测试 */
-  async testSavedModel(id: string, userId?: string, role?: string): Promise<TestConnectionResult> {
+  async testSavedModel(
+    id: string,
+    userId?: string,
+    role?: string,
+  ): Promise<TestConnectionResult> {
     const model = await this.requireModel(id, userId, role);
     const config: ProviderConnectionConfig = {
       baseUrl: model.baseUrl,
@@ -312,12 +374,26 @@ export class ModelService {
         ? this.crypto.decrypt(model.apiKeyEncrypted)
         : '',
       modelName: model.modelName,
+      ...(model.type === 'embedding'
+        ? {
+            embeddingDimensions: model.extraConfig.dimensions as
+              number | undefined,
+            supportsDimensionOverride: model.extraConfig
+              .supportsDimensionOverride as boolean | undefined,
+          }
+        : {}),
     };
-    return this.factory.getRaw(model.provider).testConnection(config, model.type);
+    return this.factory
+      .getRaw(model.provider)
+      .testConnection(config, model.type);
   }
 
   /** 模型调试（POST /models/:id/debug）：固定测试消息 → 实际生成文本 */
-  async debug(id: string, userId?: string, role?: string): Promise<DebugResult> {
+  async debug(
+    id: string,
+    userId?: string,
+    role?: string,
+  ): Promise<DebugResult> {
     const model = await this.requireModel(id, userId, role);
     const provider = this.factory.create(model);
     const output = await provider.chat(

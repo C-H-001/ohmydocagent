@@ -6,7 +6,7 @@
 //   参数，登记：如需服务端搜索可后续在 ListKbDto 增加 keyword）
 // - 卡片操作：收藏 PUT :id/favorite、置顶 PUT :id/pin、复制 POST :id/duplicate、
 //   删除 DELETE :id（确认弹窗）
-// - 新建向导 5 步 → POST /kbs（name/description/chunkingConfig/extractConfig）
+// - 新建向导 5 步 → POST /kbs（name/description/embeddingModelId/chunkingConfig/extractConfig）
 // - 进入详情跳 /kb/:id
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -18,6 +18,8 @@ import {
 } from "lucide-react"
 import { cn, toast } from "../../components/ui"
 import { kbApi, type KbListItem } from "../../api/kb"
+import { modelApi } from "../../api/settings"
+import type { Model } from "../../api/types"
 import { formatDateTime } from "../../utils/format"
 import { useAuth } from "../../store/auth"
 
@@ -55,14 +57,54 @@ export default function KnowledgeBasesView() {
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [embeddingModels, setEmbeddingModels] = useState<Model[]>([])
+  const [embeddingLoading, setEmbeddingLoading] = useState(true)
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null)
+  const [embeddingRetry, setEmbeddingRetry] = useState(0)
 
   const [wizardForm, setWizardForm] = useState({
     name: "", description: "",
     vectorSearch: true, graphExtract: false,
-    embeddingModel: "text-embedding-3-large", summaryModel: "gpt-4o-mini",
+    embeddingModel: "", summaryModel: "gpt-4o-mini",
     chunkSize: "512", overlap: "64", chunkStrategy: "token",
     parserPDF: "mineru", parserWord: "mineru", parserImage: "mineru", parserMd: "native",
   })
+
+  useEffect(() => {
+    if (!showWizard) return
+    let closed = false
+    setEmbeddingModels([])
+    setEmbeddingLoading(true)
+    setEmbeddingError(null)
+    if (!user?.id) {
+      setEmbeddingError("请先登录后重试")
+      setEmbeddingLoading(false)
+      return
+    }
+    void modelApi.list("embedding").then(result => {
+      if (closed) return
+      const models = result.filter(m => m.userId === user.id && m.enabled && m.type === "embedding")
+      setEmbeddingModels(models)
+      setWizardForm(prev => ({
+        ...prev,
+        embeddingModel: models.some(m => m.id === prev.embeddingModel)
+          ? prev.embeddingModel : models.find(m => m.isDefault)?.id ?? "",
+      }))
+    }).catch(err => {
+      if (!closed) setEmbeddingError(err instanceof Error ? err.message : "请稍后重试")
+    }).finally(() => {
+      if (!closed) setEmbeddingLoading(false)
+    })
+    return () => { closed = true }
+  }, [showWizard, user?.id, embeddingRetry])
+
+  const embeddingValid = !embeddingLoading && !embeddingError
+    && embeddingModels.some(m => m.id === wizardForm.embeddingModel && m.userId === user?.id)
+  const embeddingBlocked = wizardForm.vectorSearch && !embeddingValid
+  const embeddingStatus = embeddingLoading ? "正在加载模型…"
+    : embeddingError ? `模型加载失败：${embeddingError}`
+    : embeddingModels.length === 0 ? "暂无可用的 Embedding 模型，请先在设置中添加并启用。"
+    : !embeddingValid ? "请选择 Embedding 模型。" : null
 
   // 拉取列表（view 切换触发；搜索为前端过滤）
   const loadKbs = useCallback(async (view: FilterTab) => {
@@ -151,11 +193,16 @@ export default function KnowledgeBasesView() {
 
   const handleCreateKb = async () => {
     if (creating) return
+    if (embeddingBlocked) {
+      setWizardStep(3)
+      return
+    }
     setCreating(true)
     try {
       const res = await kbApi.createKb({
         name: wizardForm.name,
         description: wizardForm.description || undefined,
+        ...(wizardForm.vectorSearch ? { embeddingModelId: wizardForm.embeddingModel } : {}),
         chunkingConfig: {
           strategy: wizardForm.chunkStrategy === "recursive" || wizardForm.chunkStrategy === "header" ? wizardForm.chunkStrategy : "token",
           chunkSize: Number(wizardForm.chunkSize) || 800,
@@ -306,11 +353,20 @@ export default function KnowledgeBasesView() {
           step={wizardStep}
           form={wizardForm}
           onChange={(f) => setWizardForm((prev) => ({ ...prev, ...f }))}
-          onNext={() => setWizardStep((prev) => Math.min(5, prev + 1) as WizardStep)}
+          onNext={() => {
+            if (wizardStep >= 3 && embeddingBlocked) return
+            setWizardStep((prev) => Math.min(5, prev + 1) as WizardStep)
+          }}
           onPrev={() => setWizardStep((prev) => Math.max(1, prev - 1) as WizardStep)}
           onClose={() => setShowWizard(false)}
           onCreate={handleCreateKb}
           creating={creating}
+          embeddingModels={embeddingModels}
+          embeddingBlocked={embeddingBlocked}
+          embeddingStatus={embeddingStatus}
+          embeddingFailed={!!embeddingError}
+          onRetryModels={!embeddingLoading && (!!embeddingError || embeddingModels.length === 0)
+            ? () => setEmbeddingRetry(prev => prev + 1) : undefined}
         />
       )}
     </div>
@@ -540,6 +596,7 @@ function EmptyState({ onNew, search }: { onNew: () => void; search: string }) {
 // ─── New KB Wizard（5 步，复用原型 UI；最终 POST /kbs） ─────────────────────
 function NewKbWizard({
   step, form, onChange, onNext, onPrev, onClose, onCreate, creating,
+  embeddingModels, embeddingBlocked, embeddingStatus, embeddingFailed, onRetryModels,
 }: {
   step: WizardStep
   form: Record<string, string | boolean>
@@ -549,7 +606,18 @@ function NewKbWizard({
   onClose: () => void
   onCreate: () => void
   creating: boolean
+  embeddingModels: Model[]
+  embeddingBlocked: boolean
+  embeddingStatus: string | null
+  embeddingFailed: boolean
+  onRetryModels?: () => void
 }) {
+  const modelStatus = embeddingStatus && (
+    <div role={embeddingFailed ? "alert" : "status"} className="text-xs text-muted-foreground">
+      {embeddingStatus}
+      {onRetryModels && <button onClick={onRetryModels} className="ml-2 text-accent hover:underline">重试</button>}
+    </div>
+  )
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-card border border-border rounded-xl shadow-2xl w-[680px] flex flex-col max-h-[85vh]">
@@ -586,9 +654,10 @@ function NewKbWizard({
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {step === 1 && <WizardStep1 form={form} onChange={onChange} />}
           {step === 2 && <WizardStep2 form={form} onChange={onChange} />}
-          {step === 3 && <WizardStep3 form={form} onChange={onChange} />}
+          {step === 3 && <WizardStep3 form={form} onChange={onChange} models={embeddingModels} status={modelStatus} />}
           {step === 4 && <WizardStep4 form={form} onChange={onChange} />}
           {step === 5 && <WizardStep5 form={form} onChange={onChange} />}
+          {step > 3 && embeddingBlocked && <div className="mt-3">{modelStatus}</div>}
         </div>
 
         {/* Navigation */}
@@ -603,7 +672,7 @@ function NewKbWizard({
           {step < 5 ? (
             <button
               onClick={onNext}
-              disabled={step === 1 && !form.name}
+              disabled={(step === 1 && !form.name) || (step >= 3 && embeddingBlocked)}
               className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:pointer-events-none"
             >
               下一步
@@ -611,7 +680,7 @@ function NewKbWizard({
           ) : (
             <button
               onClick={onCreate}
-              disabled={creating}
+              disabled={creating || embeddingBlocked}
               className="h-9 px-4 text-sm bg-accent text-accent-foreground rounded-md hover:bg-accent/90 transition-colors disabled:opacity-60 flex items-center gap-2"
             >
               {creating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -716,29 +785,30 @@ function ToggleOption({ label, desc, checked, onToggle, badge, badgeColor }: {
   )
 }
 
-function WizardStep3({ form, onChange }: { form: Record<string, string | boolean>; onChange: (f: any) => void }) {
-  const models = [
-    { value: "text-embedding-3-large", label: "text-embedding-3-large", provider: "OpenAI", dim: 3072 },
-    { value: "text-embedding-3-small", label: "text-embedding-3-small", provider: "OpenAI", dim: 1536 },
-    { value: "bge-m3", label: "BAAI/bge-m3", provider: "本地", dim: 1024 },
-  ]
+function WizardStep3({ form, onChange, models, status }: {
+  form: Record<string, string | boolean>
+  onChange: (f: any) => void
+  models: Model[]
+  status: React.ReactNode
+}) {
   return (
     <div className="space-y-5">
-      <FormRow label="Embedding 模型" hint="模型选择记录在 KB 配置中（当前后端未强绑定，仅作展示与预留）">
+      <FormRow label="Embedding 模型">
+        {status}
         <div className="space-y-2">
           {models.map((m) => (
-            <label key={m.value} className={cn(
+            <label key={m.id} className={cn(
               "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-all",
-              form.embeddingModel === m.value ? "border-primary bg-primary/5" : "border-border hover:border-foreground/30"
+              form.embeddingModel === m.id ? "border-primary bg-primary/5" : "border-border hover:border-foreground/30"
             )}>
-              <input type="radio" name="embedding" value={m.value}
-                checked={form.embeddingModel === m.value}
-                onChange={() => onChange({ embeddingModel: m.value })}
+              <input type="radio" name="embedding" value={m.id}
+                checked={form.embeddingModel === m.id}
+                onChange={() => onChange({ embeddingModel: m.id })}
                 className="accent-primary"
               />
               <div className="flex-1">
-                <div className="text-sm font-medium font-mono">{m.label}</div>
-                <div className="text-xs text-muted-foreground">{m.provider} · dim={m.dim}</div>
+                <div className="text-sm font-medium font-mono">{m.name}</div>
+                <div className="text-xs text-muted-foreground">{m.modelName}{typeof m.extraConfig?.dimensions === "number" && ` · ${m.extraConfig.dimensions} 维`}</div>
               </div>
             </label>
           ))}

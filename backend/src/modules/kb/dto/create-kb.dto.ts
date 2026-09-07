@@ -4,6 +4,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   ValidateNested,
@@ -12,6 +13,10 @@ import { Type } from 'class-transformer';
 import { ExtractConfigDto } from './extract-config.dto.js';
 
 export class CreateKbDto {
+  @IsOptional()
+  @IsUUID('4', { message: '向量模型 ID 无效' })
+  embeddingModelId?: string;
+
   @IsString({ message: '名称必须是字符串' })
   @IsNotEmpty({ message: '名称不能为空' })
   // IsNotEmpty 只拦截空串/undefined，纯空白（如 '   '）会漏过——

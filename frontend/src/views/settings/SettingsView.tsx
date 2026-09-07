@@ -1,7 +1,6 @@
 // 设置中心（frontend/src/views/settings/SettingsView.tsx，Task 5.8）
 // 12 子页真实 API 对接（轻量模式）：
 //   个人资料 GET/PUT /settings/profile + POST /settings/change-password
-//   工作区信息：当前用户 + 系统信息（只读，简化）
 //   成员管理 GET/PUT /users、POST /users/transfer-ownership + /invitations
 //   模型管理 GET/POST/PUT/DELETE /models + /models/test|:id/test|:id/debug
 //   解析引擎：静态信息（简化，复用系统信息）
@@ -20,7 +19,7 @@ import {
   Trash2, Crown, Shield, RefreshCw, AlertCircle,
   Search, Cpu, Play, CheckCircle, XCircle,
   ToggleLeft, ToggleRight, Clock, Key, Activity,
-  GitBranch, Globe, User, Building2, Settings2, Zap,
+  GitBranch, Globe, User, Settings2, Zap,
   Mail, Link as LinkIcon, RotateCcw, Database, Server, Gauge,
   MessageSquare, Pencil
 } from "lucide-react"
@@ -42,16 +41,15 @@ const PROVIDER_PRESETS = [
 ] as const
 
 type TabId =
-  | "profile" | "workspace" | "usage" | "members"
+  | "profile" | "usage" | "members"
   | "models" | "parser" | "websearch" | "history"
   | "apikeys" | "queue" | "audit" | "system" | "version"
 
 const NAV_GROUPS = [
   {
-    label: "账号与工作区",
+    label: "账号设置",
     items: [
       { id: "profile" as TabId, label: "个人资料", icon: <User className="w-3.5 h-3.5" /> },
-      { id: "workspace" as TabId, label: "工作区信息", icon: <Building2 className="w-3.5 h-3.5" /> },
       { id: "usage" as TabId, label: "模型用量", icon: <Gauge className="w-3.5 h-3.5" /> },
     ],
   },
@@ -121,7 +119,6 @@ export default function SettingsView() {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-8 py-8">
           {activeTab === "profile" && <ProfileSettings />}
-          {activeTab === "workspace" && <WorkspaceSettings />}
           {activeTab === "usage" && <ModelUsageSettings />}
           {activeTab === "members" && <MembersSettings />}
           {activeTab === "models" && <ModelsSettings />}
@@ -201,7 +198,7 @@ function ProfileSettings() {
           <div className="text-sm font-semibold">{name || "未设置昵称"}</div>
           <div className="text-xs text-muted-foreground">{email}</div>
           <div className="text-[10px] text-muted-foreground mt-0.5">
-            {user?.role === "super" ? "Owner" : "Admin"} · 注册于 {user?.createdAt ? new Date(user.createdAt).toLocaleDateString("zh-CN") : "-"}
+            注册于 {user?.createdAt ? new Date(user.createdAt).toLocaleDateString("zh-CN") : "-"}
           </div>
         </div>
       </div>
@@ -244,41 +241,6 @@ function ProfileSettings() {
       )}
 
       <SaveButton saved={saved} saving={saving} onClick={() => void handleSave()} />
-    </div>
-  )
-}
-
-// ─── 工作区信息 ───────────────────────────────────────────────────────────────
-function WorkspaceSettings() {
-  const { user } = useAuth()
-  const [sysInfo, setSysInfo] = useState<{ version?: string; services?: Record<string, unknown> } | null>(null)
-
-  useEffect(() => {
-    void systemApi.info().then(setSysInfo).catch(() => {})
-  }, [])
-
-  const rows: [string, string][] = [
-    ["工作区所有者", user?.name || user?.email || "-"],
-    ["所有者邮箱", user?.email || "-"],
-    ["角色", user?.role === "super" ? "Owner" : "Admin"],
-    ["用户 ID", user?.id?.slice(0, 8) ?? "-"],
-    ["产品版本", sysInfo?.version ?? "-"],
-  ]
-
-  return (
-    <div className="space-y-6">
-      <SectionHeader title="工作区信息" desc="工作区概览（只读）" />
-      <div className="bg-card border border-border rounded-lg divide-y divide-border">
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-muted-foreground">{k}</span>
-            <span className="text-sm font-mono font-medium truncate max-w-[60%]">{v}</span>
-          </div>
-        ))}
-      </div>
-      <div className="p-3 border border-border bg-muted/30 rounded-md text-xs text-muted-foreground">
-        存储用量与运行环境详情见「版本信息」页（GET /system/info）。
-      </div>
     </div>
   )
 }
@@ -366,7 +328,7 @@ function MembersSettings() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <SectionHeader title="成员管理" desc="管理工作区访问权限" />
+        <SectionHeader title="成员管理" desc="管理系统账号与访问权限" />
         {isOwner && (
           <button onClick={() => setShowInvite(!showInvite)} className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2">
             <Plus className="w-4 h-4" />邀请成员
@@ -504,6 +466,29 @@ const PROVIDER_LABELS: Record<string, string> = {
   ollama: "Ollama 本地",
 }
 
+function EmbeddingModelFields({ dimensions, onDimensionsChange, supportsOverride, onOverrideChange }: {
+  dimensions: string
+  onDimensionsChange: (value: string) => void
+  supportsOverride: boolean
+  onOverrideChange: (value: boolean) => void
+}) {
+  return (
+    <div className="space-y-3">
+      <Field label="输出维度（可选）">
+        <input aria-label="输出维度" inputMode="numeric" value={dimensions} onChange={e => onDimensionsChange(e.target.value)} placeholder="留空自动探测" className={inputCls} />
+        <p className="text-[11px] text-muted-foreground">正整数 1～4000；留空由实际模型输出自动探测。</p>
+      </Field>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-medium">模型支持指定输出维度</span>
+        <button type="button" role="switch" aria-label="模型支持指定输出维度" aria-checked={supportsOverride} onClick={() => onOverrideChange(!supportsOverride)}>
+          {supportsOverride ? <ToggleRight className="w-8 h-8 text-accent" /> : <ToggleLeft className="w-8 h-8 text-muted-foreground" />}
+        </button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">仅在模型支持 dimensions 参数时开启。</p>
+    </div>
+  )
+}
+
 function ModelsSettings() {
   const { user } = useAuth()
   const isSuper = user?.role === "super"
@@ -535,11 +520,28 @@ function ModelsSettings() {
 
   useEffect(() => { void load() }, [load])
 
+  const [dimensions, setDimensions] = useState("")
+  const [supportsDimensionOverride, setSupportsDimensionOverride] = useState(false)
+  const prepareForm = (): ModelForm => {
+    const extraConfig = { ...form.extraConfig }
+    delete extraConfig.dimensions
+    delete extraConfig.supportsDimensionOverride
+    if (form.type === "embedding") {
+      const value = dimensions.trim()
+      if (value && (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 4000)) {
+        throw new Error("输出维度必须是 1～4000 的正整数，或留空自动探测")
+      }
+      if (value) extraConfig.dimensions = Number(value)
+      extraConfig.supportsDimensionOverride = supportsDimensionOverride
+    }
+    return { ...form, extraConfig }
+  }
+
   const handleTest = async () => {
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await modelApi.testConnection(form)
+      const res = await modelApi.testConnection(prepareForm())
       setTestResult(res.ok ? "ok" : "fail")
       if (!res.ok) toast(res.error ?? "连接失败", "error")
     } catch (err) {
@@ -553,7 +555,7 @@ function ModelsSettings() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await modelApi.create(form)
+      await modelApi.create(prepareForm())
       toast("模型已新增")
       setShowAdd(false)
       setForm({ provider: "openai-compatible", name: "", baseUrl: "", apiKey: "", modelName: "", type: "chat" })
@@ -570,7 +572,10 @@ function ModelsSettings() {
     setEditingId(m.id)
     setForm({
       provider: m.provider, name: m.name, baseUrl: m.baseUrl, apiKey: "", modelName: m.modelName, type: m.type,
+      extraConfig: { ...m.extraConfig },
     })
+    setDimensions(m.extraConfig?.dimensions == null ? "" : String(m.extraConfig.dimensions))
+    setSupportsDimensionOverride(m.extraConfig?.supportsDimensionOverride === true)
     setTestResult(null)
   }
 
@@ -582,6 +587,7 @@ function ModelsSettings() {
         name: form.name,
         baseUrl: form.baseUrl,
         modelName: form.modelName,
+        extraConfig: prepareForm().extraConfig,
         // apiKey 留空 = 不修改（后端 update 空串 = 清除；此处不传则保持）
         ...(form.apiKey ? { apiKey: form.apiKey } : {}),
       })
@@ -635,7 +641,13 @@ function ModelsSettings() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <SectionHeader title="模型管理" desc="配置对话、Embedding、重排序等模型供应商" />
-        <button onClick={() => { setShowAdd(true); setTestResult(null) }} className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2">
+        <button onClick={() => {
+          setForm({ provider: "openai-compatible", name: "", baseUrl: "", apiKey: "", modelName: "", type: "chat" })
+          setDimensions("")
+          setSupportsDimensionOverride(false)
+          setShowAdd(true)
+          setTestResult(null)
+        }} className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2">
           <Plus className="w-4 h-4" />新增模型
         </button>
       </div>
@@ -650,12 +662,12 @@ function ModelsSettings() {
               <span className="text-sm font-semibold">我的模型</span>
               <span className="text-[11px] text-muted-foreground">配置你自己的模型与 API Key（对话/Embedding/重排序分别设置默认）</span>
             </div>
-            {models.filter(m => m.userId !== null).length === 0 ? (
+            {models.filter(m => m.userId === user?.id).length === 0 ? (
               <div className="text-xs text-muted-foreground py-6 text-center border border-dashed border-border rounded-lg">
                 还没有配置模型——点「新增模型」选择提供商（DeepSeek/通义千问/Ollama 等），填入你自己的 API Key
               </div>
             ) : (
-              <ModelList items={models.filter(m => m.userId !== null)} isSuper={isSuper} />
+              <ModelList items={models.filter(m => m.userId === user?.id)} isSuper={isSuper} onEdit={handleEdit} />
             )}
           </div>
         </div>
@@ -682,6 +694,7 @@ function ModelsSettings() {
               <FormRow label="API Key" hint="留空 = 保持原 Key；填了则覆盖（修复「解密失败」时重新填入）">
                 <input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} className={inputCls} placeholder="sk-..." />
               </FormRow>
+              {form.type === "embedding" && <EmbeddingModelFields dimensions={dimensions} onDimensionsChange={setDimensions} supportsOverride={supportsDimensionOverride} onOverrideChange={setSupportsDimensionOverride} />}
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button onClick={() => setEditingId(null)} className="h-9 px-4 text-sm border border-border rounded-md hover:bg-muted">取消</button>
@@ -747,6 +760,7 @@ function ModelsSettings() {
               <Field label="API Key（Ollama 可留空）">
                 <PasswordInput value={form.apiKey ?? ""} onChange={v => setForm(p => ({ ...p, apiKey: v }))} placeholder="sk-..." />
               </Field>
+              {form.type === "embedding" && <EmbeddingModelFields dimensions={dimensions} onDimensionsChange={setDimensions} supportsOverride={supportsDimensionOverride} onOverrideChange={setSupportsDimensionOverride} />}
 
               <div className="flex items-center gap-3">
                 <button
@@ -1721,7 +1735,7 @@ function ModelUsageSettings() {
 
 // ─── 模型配置（普通用户只读视图：查看可用模型与默认模型，无管理操作） ─────────
 // 模型列表（BYOK 分区块共用：我的模型 / 全局默认）
-function ModelList({ items, isSuper }: { items: Model[]; isSuper: boolean }) {
+function ModelList({ items, isSuper, onEdit }: { items: Model[]; isSuper: boolean; onEdit?: (model: Model) => void }) {
   const toast_ = toast
   const [debugId, setDebugId] = useState<string | null>(null)
   const [debugMsg, setDebugMsg] = useState("你好，请简单介绍一下自己。")
@@ -1762,10 +1776,11 @@ function ModelList({ items, isSuper }: { items: Model[]; isSuper: boolean }) {
               {MODEL_TYPE_LABELS[m.type] ?? m.type}
               {m.isDefault && <span className="ml-1.5 text-[9px] text-amber-600 border border-amber-200 rounded-full px-1.5 py-0.5">默认</span>}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center flex-wrap gap-2">
               {m.enabled
                 ? <span className="flex items-center gap-1 text-[10px] text-emerald-600"><CheckCircle className="w-3 h-3" />可用</span>
                 : <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><XCircle className="w-3 h-3" />停用</span>}
+              {onEdit && <button onClick={() => onEdit(m)} aria-label="编辑模型" title="编辑模型" className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"><Pencil className="w-3 h-3" /></button>}
               <button
                 onClick={() => { void modelApi.testSaved(m.id).then(res => toast_(res.ok ? "连接正常" : `连接失败：${res.error}`, res.ok ? "success" : "error")) }}
                 className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors" title="测试连通"

@@ -38,6 +38,34 @@ export class LLMProviderFactory {
       apiKey,
       modelName: model.modelName,
     };
+    // embedding 参数仅用于向量模型；聊天/重排配置不读取、不校验这些字段。
+    if (model.type === 'embedding') {
+      const dimensions = model.extraConfig?.dimensions;
+      const supportsDimensionOverride =
+        model.extraConfig?.supportsDimensionOverride;
+      if (dimensions !== undefined) {
+        if (
+          typeof dimensions !== 'number' ||
+          !Number.isInteger(dimensions) ||
+          dimensions < 1 ||
+          dimensions > 4000
+        ) {
+          throw new Error('embedding dimensions 必须是 1..4000 的正整数');
+        }
+        config.embeddingDimensions = dimensions;
+      }
+      if (supportsDimensionOverride !== undefined) {
+        if (typeof supportsDimensionOverride !== 'boolean') {
+          throw new Error('supportsDimensionOverride 必须是 boolean（布尔值）');
+        }
+        config.supportsDimensionOverride = supportsDimensionOverride;
+      }
+      if (model.provider === 'ollama' && supportsDimensionOverride === true) {
+        throw new Error(
+          'Ollama 当前适配器不支持 dimensions override，请关闭维度覆盖',
+        );
+      }
+    }
     switch (model.provider) {
       case 'ollama':
         return this.ollama.withConfig(config);

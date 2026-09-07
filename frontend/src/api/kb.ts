@@ -32,6 +32,43 @@ export interface KbListItem extends KnowledgeBase {
   chunkCount: number
 }
 
+export interface ProfileView {
+  id: string
+  modelId: string
+  modelName: string
+  dimension: number
+}
+
+export interface EmbeddingState {
+  active: ProfileView | null
+  pending: ProfileView | null
+  previous: ProfileView | null
+  totalChunks: number
+  indexedChunks: number
+  pendingIndexedChunks: number
+  legacyChunks: number
+  error: string | null
+  status: "unbound" | "ready" | "building" | "failed"
+}
+
+export const embeddingApi = {
+  get(kbId: string): Promise<EmbeddingState> {
+    return api.get(`/kbs/${kbId}/embedding`)
+  },
+  rebuild(kbId: string, modelId: string): Promise<EmbeddingState> {
+    return api.post(`/kbs/${kbId}/embedding/rebuild`, { modelId })
+  },
+  activate(kbId: string): Promise<EmbeddingState> {
+    return api.post(`/kbs/${kbId}/embedding/activate`, {})
+  },
+  rollback(kbId: string): Promise<EmbeddingState> {
+    return api.post(`/kbs/${kbId}/embedding/rollback`, {})
+  },
+  cancel(kbId: string): Promise<EmbeddingState> {
+    return api.post(`/kbs/${kbId}/embedding/cancel`, {})
+  },
+}
+
 /** 解析阶段记录（knowledge-progress.service：stage 追加时间线） */
 export interface ParserStage {
   stage: string
@@ -85,6 +122,7 @@ export const kbApi = {
   createKb(body: {
     name: string
     description?: string
+    embeddingModelId?: string
     chunkingConfig?: Record<string, unknown>
     extractConfig?: { enabled: boolean }
   }): Promise<KnowledgeBase> {

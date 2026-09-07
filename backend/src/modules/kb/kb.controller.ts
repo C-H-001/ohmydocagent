@@ -89,7 +89,10 @@ export class KbController {
   async getById(@Param('id') id: string, @CurrentUser() user: User) {
     const kb = await this.kbService.getById(id);
     // 当前用户权限档（view/edit/admin/full）——前端条件渲染共享管理入口
-    const myPermission = await this.kbAccessService.effectivePermission(user, id);
+    const myPermission = await this.kbAccessService.effectivePermission(
+      user,
+      id,
+    );
     // 访问记录是辅助数据：失败不阻断详情返回，但必须留日志（质量审查整改——
     // 原先静默吞错，生产环境无法排查记录失败原因）
     await this.kbService
@@ -151,6 +154,7 @@ export class KbController {
    *   keywordScore }] }——score 为融合排序分（相对值，仅用于排序，注释见
    *   vector.service.ts hybridSearch 文档）
    */
+  @RequireKbPermission('view')
   @Post(':id/hybrid-search')
   @HttpCode(200) // 检索是动作而非创建资源：显式 200（NestJS POST 默认 201）
   async hybridSearch(

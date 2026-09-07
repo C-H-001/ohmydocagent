@@ -321,7 +321,15 @@ export class OllamaProvider implements LLMProvider {
   }
 
   async embed(texts: string[], model?: string): Promise<number[][]> {
+    if (texts.length === 0) return [];
     const config = this.requireConfig();
+    // 当前适配器未实现上游维度覆盖；不可静默忽略开关或本地截断向量。
+    // embeddingDimensions 仍可用于校验模型的原生输出维度。
+    if (config.supportsDimensionOverride === true) {
+      throw new Error(
+        'Ollama 当前适配器不支持 dimensions override，请关闭维度覆盖',
+      );
+    }
     // SSRF 防护：同 chat（见该处注释与 ssrf.guard.ts）
     await assertSafeBaseUrl(config.baseUrl);
     const url = `${this.normalizeBaseUrl(config.baseUrl)}/api/embed`;
@@ -344,11 +352,49 @@ export class OllamaProvider implements LLMProvider {
       const detail = await extractErrorDetail(res);
       throw new Error(`Ollama 请求失败（HTTP ${res.status}）: ${detail}`);
     }
-    const data = parseJsonBody(await res.text()) as { embeddings?: number[][] };
-    if (!Array.isArray(data.embeddings)) {
+    const data = parseJsonBody(await res.text()) as {
+      embeddings?: unknown[];
+    } | null;
+    if (!Array.isArray(data?.embeddings)) {
       throw new Error('Ollama 响应缺少 embeddings 数组（格式异常）');
     }
-    return data.embeddings;
+    const vectors = data.embeddings;
+    if (vectors.length !== texts.length) {
+      throw new Error(
+        `Ollama 响应向量数量不一致（期望 ${texts.length}，收到 ${vectors.length}，格式异常）`,
+      );
+    }
+    let firstDim: number | undefined;
+    for (let i = 0; i < vectors.length; i++) {
+      const vector = vectors[i];
+      if (!Array.isArray(vector) || vector.length === 0) {
+        throw new Error(`Ollama 响应第 ${i} 个向量缺失或为空（格式异常）`);
+      }
+      firstDim ??= vector.length;
+      if (vector.length !== firstDim) {
+        throw new Error(`Ollama 响应第 ${i} 个向量维度不一致（格式异常）`);
+      }
+      if (
+        config.embeddingDimensions !== undefined &&
+        vector.length !== config.embeddingDimensions
+      ) {
+        throw new Error(
+          `Ollama 响应向量维度不符合配置（第 ${i} 个 ${vector.length} 维，期望 ${config.embeddingDimensions} 维）`,
+        );
+      }
+      if (
+        !vector.every(
+          (value: unknown) =>
+            typeof value === 'number' && Number.isFinite(value),
+        )
+      ) {
+        throw new Error(`Ollama 响应第 ${i} 个向量含非有限数值（格式异常）`);
+      }
+      if (!vector.some((value: number) => value !== 0)) {
+        throw new Error(`Ollama 响应第 ${i} 个向量为零向量（格式异常）`);
+      }
+    }
+    return vectors as number[][];
   }
 
   async testConnection(

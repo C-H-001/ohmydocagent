@@ -1,0 +1,10 @@
+# Reuse an already working MinerU runtime, including its cached model weights.
+# Legacy deployments use --build-arg PARSER_PACKAGE=docmind_parser.
+ARG PARSER_BASE_IMAGE=ohmydocagent/parser:fixed
+FROM ${PARSER_BASE_IMAGE}
+ARG PARSER_PACKAGE=ohmydocagent_parser
+
+# Fail rather than silently copy into an unused package directory.
+RUN test -f /app/src/${PARSER_PACKAGE}/engines/mineru_engine.py
+COPY parser/router.py parser/media.py parser/server.py parser/contracts.py parser/prompts.py /app/src/${PARSER_PACKAGE}/
+COPY parser/engines/mineru_engine.py /app/src/${PARSER_PACKAGE}/engines/mineru_engine.py

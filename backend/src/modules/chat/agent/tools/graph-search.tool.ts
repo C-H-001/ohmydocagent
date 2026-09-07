@@ -15,7 +15,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Chunk } from '../../../chunk/chunk.entity.js';
 import { GraphSearchService } from '../../../graph/graph-search.service.js';
-import type { Tool, ToolExecutionContext, ToolExecutionResult } from './tool.interface.js';
+import { SearchScopeService } from '../../../vector/search-scope.service.js';
+import type {
+  Tool,
+  ToolExecutionContext,
+  ToolExecutionResult,
+} from './tool.interface.js';
 
 /** 实体解析关键词上限（query 切词用——对齐 graph-search 的 MAX_ENTITY_KEYWORDS） */
 const MAX_ENTITY_KEYWORDS = 6;
@@ -52,6 +57,7 @@ export class GraphSearchTool implements Tool {
     private readonly graphSearchService: GraphSearchService,
     @InjectRepository(Chunk)
     private readonly chunkRepo: Repository<Chunk>,
+    private readonly searchScopes: SearchScopeService,
   ) {}
 
   async execute(
@@ -71,6 +77,7 @@ export class GraphSearchTool implements Tool {
       };
     }
     try {
+      await this.searchScopes.resolve(kbIds, [], ctx.userId);
       // 实体解析：优先 query 切词（图谱实体为名词短语——对 query 直接按
       // 分隔符切词即可命中，无需额外 LLM 调用；WeKnora query_knowledge_graph
       // 同款「query 即实体/关系查询」语义）
@@ -79,7 +86,10 @@ export class GraphSearchTool implements Tool {
         .map((t) => t.trim())
         .filter((t) => t.length > 1)
         .slice(0, MAX_ENTITY_KEYWORDS);
-      const g = await this.graphSearchService.graphRetrieveByEntities(keywords, kbIds);
+      const g = await this.graphSearchService.graphRetrieveByEntities(
+        keywords,
+        kbIds,
+      );
       if (g.chunkIds.length === 0 && !g.entityContext) {
         return { content: '', status: 'done', references: [] };
       }
@@ -97,8 +107,9 @@ export class GraphSearchTool implements Tool {
             chunks
               .sort((a, b) => (byId.get(a.id) ?? 99) - (byId.get(b.id) ?? 99))
               .slice(0, 4)
-              .map((c, i) =>
-                `[G${i + 1}] ${c.content.slice(0, GRAPH_CHUNK_PREVIEW)}${c.content.length > GRAPH_CHUNK_PREVIEW ? '…' : ''}`,
+              .map(
+                (c, i) =>
+                  `[G${i + 1}] ${c.content.slice(0, GRAPH_CHUNK_PREVIEW)}${c.content.length > GRAPH_CHUNK_PREVIEW ? '…' : ''}`,
               )
               .join('\n');
         }

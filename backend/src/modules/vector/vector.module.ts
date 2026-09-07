@@ -5,10 +5,27 @@
 import { Module } from '@nestjs/common';
 import { ModelModule } from '../model/model.module.js';
 import { VectorService } from './vector.service.js';
+import { EmbeddingIndexService } from './embedding-index.service.js';
+import { EmbeddingBindingService } from './embedding-binding.service.js';
+import { EmbeddingIndexingService } from './embedding-indexing.service.js';
+import { SearchScopeService } from './search-scope.service.js';
+import { EmbeddingController } from './embedding.controller.js';
 
 @Module({
   imports: [ModelModule],
-  providers: [VectorService],
-  exports: [VectorService],
+  providers: [
+    VectorService,
+    EmbeddingIndexService,
+    EmbeddingBindingService,
+    EmbeddingIndexingService,
+    SearchScopeService,
+  ],
+  controllers: [EmbeddingController],
+  exports: [
+    VectorService,
+    EmbeddingBindingService,
+    EmbeddingIndexingService,
+    SearchScopeService,
+  ],
 })
 export class VectorModule {}

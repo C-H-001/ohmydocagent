@@ -28,27 +28,20 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { InjectQueue } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
 import { EntityManager, DataSource, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { segment } from '../../common/utils/chinese-seg.js';
 import { paginate, Paginated } from '../../common/pagination.js';
 import { Knowledge } from '../knowledge/knowledge.entity.js';
-import { addQueueJob, EMBED_QUEUE } from '../parse/parse-queue.constants.js';
-import type { EmbedJob } from '../parse/parse-queue.constants.js';
 import { Chunk } from './chunk.entity.js';
 import { ChunkRevision } from './chunk-revision.entity.js';
 import type { ChunkUnit } from './chunking.service.js';
 
 @Injectable()
 export class ChunkService {
-  private readonly logger = new Logger(ChunkService.name);
-
   constructor(
     @InjectRepository(Chunk)
     private readonly chunkRepository: Repository<Chunk>,
@@ -61,10 +54,6 @@ export class ChunkService {
     private readonly revisionRepository: Repository<ChunkRevision>,
     // 事务（编辑/回滚 = chunk 更新 + 版本记录原子化）
     private readonly dataSource: DataSource,
-    // 单块向量化队列（Task 1.9）：编辑/回滚后入队 EMBED（payload { chunkId }），
-    // 队列由 EmbedQueueModule 单点注册/导出（两侧注入同一实例，见
-    // embed-queue.module.ts 注释）
-    @InjectQueue(EMBED_QUEUE) private readonly embedQueue: Queue<EmbedJob>,
   ) {}
 
   /**
@@ -128,6 +117,10 @@ export class ChunkService {
     knowledge: Knowledge,
     units: ChunkUnit[],
   ): Promise<Chunk[]> {
+    await manager.query(
+      'SELECT id FROM knowledge_bases WHERE id=$1 FOR SHARE',
+      [knowledge.kbId],
+    );
     await manager.delete(Chunk, { knowledgeId: knowledge.id });
     return this.createChunksForKnowledge(manager, knowledge, units);
   }
@@ -181,8 +174,7 @@ export class ChunkService {
       );
       return chunk;
     });
-    // 事务提交后入队单块向量化（payload { chunkId }，见 enqueueSingleEmbed 注释）
-    this.enqueueSingleEmbed(chunkId);
+    // 正文更新与向量任务在数据库触发器内原子提交。
     return updated;
   }
 
@@ -246,7 +238,7 @@ export class ChunkService {
       );
       return chunk;
     });
-    this.enqueueSingleEmbed(chunkId);
+    // 数据库 outbox 安排向量更新。
     return updated;
   }
 
@@ -266,6 +258,11 @@ export class ChunkService {
     content: string,
     newRevision: number,
   ): Promise<void> {
+    // 必须在 UPDATE 取得 chunk 行锁之前锁 KB；行级 UPDATE 触发器已太晚。
+    await manager.query(
+      'SELECT id FROM knowledge_bases WHERE id=$1 FOR SHARE',
+      [chunk.kbId],
+    );
     const result = await manager.update(
       Chunk,
       { id: chunk.id },
@@ -360,24 +357,6 @@ export class ChunkService {
       }
       throw err;
     }
-  }
-
-  /**
-   * 入队单块向量化（Task 1.9 编辑/回滚）：payload { chunkId }——与 Task 1.6
-   * 的 knowledgeId 批量载荷并存（EmbedProcessor 按载荷分支，见
-   * embed.processor.ts）。决策（见任务书）：编辑场景块少，单块 job 精确处理
-   * 该块——若复用批量路径需依赖「编辑后无其他 processing 块」的隐式前提
-   * （批量 job 只处理 processing 块），显式 chunkId 载荷语义自明、不依赖外部
-   * 状态。配置与既有入队一致（addQueueJob 单点：attempts=2 + 指数退避）；
-   * 入队失败（Redis 抖动）不阻断编辑响应：块保持 processing，可经再次编辑/
-   * P4.3 重试入口重新触发（与 ParseProcessor.enqueueEmbed 的容错语义一致）。
-   */
-  private enqueueSingleEmbed(chunkId: string): void {
-    addQueueJob(this.embedQueue, EMBED_QUEUE, {
-      chunkId,
-    } satisfies EmbedJob).catch((err: unknown) => {
-      this.logger.warn(`单块向量化任务入队失败: ${chunkId}`, err as Error);
-    });
   }
 
   /** 删除某文档的全部分块（文档删除时调用；Task 1.7 reparse 亦可用） */

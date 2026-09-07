@@ -12,6 +12,7 @@ import { GraphModule } from '../graph/graph.module.js';
 import { KnowledgeModule } from '../knowledge/knowledge.module.js';
 import { StorageModule } from '../storage/storage.module.js';
 import { VectorModule } from '../vector/vector.module.js';
+import { ModelModule } from '../model/model.module.js';
 import { KbController } from './kb.controller.js';
 import { KnowledgeBase } from './kb.entity.js';
 import { KbShareModule } from '../kb-share/kb-share.module.js';
@@ -22,6 +23,7 @@ import { UserKbRecent } from './user-kb-recent.entity.js';
 
 @Module({
   imports: [
+    ModelModule,
     TypeOrmModule.forFeature([
       KnowledgeBase,
       UserKbPin,

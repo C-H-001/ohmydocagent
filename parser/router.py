@@ -13,11 +13,13 @@ from .contracts import (
 )
 from .engines import DoclingEngine, MinerUEngine
 from .media import (
+    CHART_MAX_OUTPUT_TOKENS,
     OpenAICompatibleVlmClient,
     describe_asset,
     estimate_image_tokens,
     is_significant_embedded_asset,
 )
+from .prompts import CHART_DATA_PROMPT
 
 
 TEXT_MIME_TYPES = {"text/plain", "text/markdown"}
@@ -217,16 +219,16 @@ def _parse_image(
 # ===== 多图批量 VLM 描述 =====
 # 单张图单独一次 VLM 请求（单 image_url）token 贵、请求次数 = 图数，浪费。
 # describe_many_assets：
-#   1) 过滤 significant asset（≥4KB）；跳过项原样返回（无描述）
-#   2) 发送前每张估算 token（按分辨率）→ 按「累计 ≥BATCH_TOKEN_BUDGET 或
-#      张数 ≥BATCH_MAX_IMAGES，谁先到切批」
+#   1) 按 source_type 分流；普通图片保留 ≥4KB 过滤，非空 chart 不按体积过滤
+#   2) 发送前估算 token；两路按相同输入阈值分批，普通图片最多16张、chart最多2张
 #   3) 每批调 client.describe_many（一次请求 N 图，模型按 [1]..[N] 编号输出）
 #   4) 批间 ThreadPool(4) 并发（图多时吞吐）
-#   5) 批内某图缺失/失败 → 仅该图回退 describe() 单张；仍失败 →
+#   5) 批内某图缺失/失败 → 仅该图回退单张，chart 保留专用提示词和输出预算；仍失败 →
 #      VLM_DESCRIPTION_FAILED 降级（不阻断文档，与既有降级语义一致）
 # 返回按原 assets 顺序的 [(asset, description|None, warning|None)]。
 _BATCH_TOKEN_BUDGET = 20000
 _BATCH_MAX_IMAGES = 16
+_CHART_BATCH_MAX_IMAGES = 2
 _VLM_PROMPT = "Describe each document image concisely for retrieval."
 
 
@@ -236,32 +238,41 @@ def describe_many_assets(
 ) -> list[tuple[object, str | None, str | None]]:
     if client is None:
         return [(a, None, None) for a in assets]
-    # 1. 过滤 significant
-    significant: list = []
+    # Explicit charts bypass the decorative-image byte threshold and never mix
+    # with ordinary images. Both routes share the existing four-worker limit.
+    groups: dict[bool, list] = {False: [], True: []}
     for asset in assets:
-        if not is_significant_embedded_asset(asset):
-            continue
-        significant.append(asset)
+        is_chart = asset.source_type == "chart"
+        if (is_chart and asset.content) or (not is_chart and is_significant_embedded_asset(asset)):
+            groups[is_chart].append(asset)
     # 2-3. 分批：累计 token ≥ BATCH_TOKEN_BUDGET 或张数 ≥ BATCH_MAX_IMAGES
-    batches: list[list] = []
-    current: list = []
-    tokens = 0
-    for asset in significant:
-        est = estimate_image_tokens(asset.content, asset.mime_type)
-        if current and (tokens + est >= _BATCH_TOKEN_BUDGET or len(current) >= _BATCH_MAX_IMAGES):
-            batches.append(current)
-            current = []
-            tokens = 0
-        current.append(asset)
-        tokens += est
-    if current:
-        batches.append(current)
+    batches: list[tuple[bool, list]] = []
+    for is_chart, group in groups.items():
+        current: list = []
+        tokens = 0
+        max_images = _CHART_BATCH_MAX_IMAGES if is_chart else _BATCH_MAX_IMAGES
+        for asset in group:
+            est = estimate_image_tokens(asset.content, asset.mime_type)
+            if current and (tokens + est >= _BATCH_TOKEN_BUDGET or len(current) >= max_images):
+                batches.append((is_chart, current))
+                current = []
+                tokens = 0
+            current.append(asset)
+            tokens += est
+        if current:
+            batches.append((is_chart, current))
     # 4. 批间并发（每批一次 describe_many——单次请求内已是 N 图，批间并发
     #    只对「批次数 >1」有意义，如超大图文档）
     from concurrent.futures import ThreadPoolExecutor
 
-    def _run_batch(batch: list) -> list:
+    def _run_batch(entry: tuple[bool, list]) -> list:
+        is_chart, batch = entry
         try:
+            if is_chart:
+                return client.describe_many(
+                    [(a.content, a.mime_type) for a in batch], prompt=CHART_DATA_PROMPT,
+                    max_tokens=CHART_MAX_OUTPUT_TOKENS, require_complete=True,
+                )
             descriptions = client.describe_many(
                 [(a.content, a.mime_type) for a in batch],
                 prompt=_VLM_PROMPT,
@@ -278,14 +289,15 @@ def describe_many_assets(
 
     # 5. 映射回 asset_key + 缺失回退单张
     results: dict[str, tuple[object, str | None, str | None]] = {}
-    for batch, descs in zip(batches, batch_results):
+    for (_is_chart, batch), descs in zip(batches, batch_results):
         for idx, asset in enumerate(batch):
             desc = descs[idx] if idx < len(descs) else None
             if not (desc and desc.strip()):
                 # 缺失/失败 → 回退单张 describe
                 try:
-                    fallback = client.describe(asset.content, mime_type=asset.mime_type)
-                    if fallback and fallback.strip():
+                    fallback_asset, fallback_warning = describe_asset(asset, client)
+                    fallback = fallback_asset.description
+                    if not fallback_warning and fallback and fallback.strip():
                         desc = fallback
                     else:
                         results[asset.asset_key] = (

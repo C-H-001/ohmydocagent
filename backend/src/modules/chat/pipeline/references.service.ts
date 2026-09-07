@@ -1,5 +1,5 @@
-// 引用系统服务（Task 2.6）：检索结果 → 同文档合并的引用列表（build）+ 生成
-// 后正文 [n] 兜底对齐（align）。本服务是**纯函数**（无 DB 依赖）——标题补查
+// 引用系统服务：检索结果 → 展示引用（build）+ 完整模型上下文（buildContext）
+// + 生成后正文 [n] 兜底对齐（align）。本服务无 DB 依赖——标题补查
 // 由调用方（管线）承担（决策：保持纯函数便于单测；DB 职责留在管线，见
 // rag-pipeline.service.ts merge 阶段注释）。
 //
@@ -11,10 +11,8 @@
 // - 编号语义：按「文档首次出现顺序」重新编号 1..N（非原始 topK 序号）——
 //   检索块数组按 score 降序，首次出现顺序 = 各文档最佳块的分数顺序；编号
 //   与 references 数组下标对齐（正文 [n] ↔ refs[n-1]），前端无需查表映射
-// - 内容截断：REFERENCE_CONTENT_MAX_LENGTH=200 字符（Task 2.6 从 500 收紧
-//   ——悬浮摘要所需信息量远小于 prompt 上下文；prompt 与悬浮摘要共用同一份
-//   截断内容，见 rag.types.ts 注释）。截断带 '…' 省略号（提示截断语义——
-//   模型看到省略号知道内容被截，不误以为原文到此为止）
+// - 展示摘要截断为 200 字符；模型上下文独立从已选分块构建，保留完整内容。
+//   引用编号在两条路径保持一致，检索 TopK 由调用方控制。
 // - 标题缺省：「未知文档」（文档已删/孤儿 chunk 不报错——引用列表的标题
 //   只是展示辅助，检索主数据是 content）
 // - align（生成后兜底对齐）：扫描正文 `[n]` 提取引用编号集合，剔除 references
@@ -30,8 +28,7 @@ import { Injectable } from '@nestjs/common';
 import type { HybridSearchItem } from '../../vector/vector.service.js';
 import type { RagReference } from './rag.types.js';
 
-/** 单块内容最大长度（字符）：悬浮摘要 + prompt 共用截断（Task 2.6 从 500
- * 收紧到 200，见文件头设计决策；实测长度 = 常量 + 1（'…' 省略号）） */
+/** 展示摘要最大长度（字符，不含省略号）；不用于限制模型上下文。 */
 export const REFERENCE_CONTENT_MAX_LENGTH = 200;
 
 /** 标题缺省值（sources Map 查不到时兜底——文档已删/孤儿 chunk） */
@@ -59,9 +56,6 @@ export class ReferencesService {
    *    sources Map 获取（缺省「未知文档」）；url 类型文档透传 sourceUrl
    * 空检索 → 空数组（不查库，快速路径）。
    */
-  /** 同文档多块拼接后的 content 上限（字符；默认单块截断 3000 的 2 倍） */
-  private static readonly MAX_MULTI_CHUNK_CHARS = 6000;
-
   build(
     chunks: HybridSearchItem[],
     sources: Map<string, ReferenceSourceInfo>,
@@ -82,18 +76,12 @@ export class ReferencesService {
     for (const [knowledgeId, group] of byDoc) {
       const main = group[0]; // 组内首个 = 最高分块（score 降序，见文件头注释）
       const info = sources.get(knowledgeId);
-      // 同文档多块答案（MMLongBench 一库一文档、参考文献/图表跨多 chunk）：
-      // 只给最高分 1 块会丢关键信息——把组内高分块内容拼接进 content
-      // （上限 ReferencesService.MAX_MULTI_CHUNK_CHARS，控制 prompt 成本；[n] 仍按文档编号，
-      // chunks 字段保留各块位置供前端定位）
-      const mergeContent = group
-        .slice(0, 8)
-        .map((c) => c.content)
-        .join('\n\n');
       // 多模态（对齐 WeKnora 引用带图）：组内 image caption 块聚合图片——
       // url/caption/assetKey（url 为存储相对路径，前端经签名图片端点加载；
       // 主块类型/页信息取自组内首个 image 块——图片问答时引用即图）
-      const imageChunks = group.filter((c) => c.type === 'image' && c.imageInfo);
+      const imageChunks = group.filter(
+        (c) => c.type === 'image' && c.imageInfo,
+      );
       const mainIsImage = main.type === 'image' && main.imageInfo;
       references.push({
         index,
@@ -101,15 +89,7 @@ export class ReferencesService {
         kbId: main.kbId,
         knowledgeId,
         knowledgeTitle: info?.title ?? UNKNOWN_TITLE,
-        content: this.truncate(
-          // image 主块：content 已是 VLM 描述（图片问答引用正文，无需拼接）
-          mainIsImage ? (main.content || '') : mergeContent,
-          mainIsImage
-            ? REFERENCE_CONTENT_MAX_LENGTH
-            : group.length > 1
-              ? 6000
-              : REFERENCE_CONTENT_MAX_LENGTH,
-        ),
+        content: this.truncate(main.content || ''),
         score: main.score,
         // 同文档全部块位置（score 降序；前端点击引用可定位到各块）
         chunks: group.map((c) => ({ chunkId: c.chunkId, score: c.score })),
@@ -143,6 +123,25 @@ export class ReferencesService {
       index += 1;
     }
     return references;
+  }
+
+  /**
+   * 为模型拼装全部已选片段，不复用展示摘要，也不按字符数或文档片段数裁剪。
+   * 使用 build 产出的文档编号与标题，确保工具正文和前端引用一一对应。
+   */
+  buildContext(chunks: HybridSearchItem[], references: RagReference[]): string {
+    const byDoc = new Map<string, string[]>();
+    for (const chunk of chunks) {
+      const group = byDoc.get(chunk.knowledgeId);
+      if (group) group.push(chunk.content);
+      else byDoc.set(chunk.knowledgeId, [chunk.content]);
+    }
+    return references
+      .map(
+        (ref) =>
+          `[${ref.index}] ${ref.knowledgeTitle}：${(byDoc.get(ref.knowledgeId) ?? []).join('\n\n')}`,
+      )
+      .join('\n');
   }
 
   /**
@@ -180,9 +179,9 @@ export class ReferencesService {
 
   /** 内容截断：超长截到 REFERENCE_CONTENT_MAX_LENGTH 并追加 '…'（提示截断
    * 语义，见文件头设计决策）；短内容原样。 */
-  private truncate(content: string, max = 3000): string {
-    return content.length > max
-      ? `${content.slice(0, max)}…`
+  private truncate(content: string): string {
+    return content.length > REFERENCE_CONTENT_MAX_LENGTH
+      ? `${content.slice(0, REFERENCE_CONTENT_MAX_LENGTH)}…`
       : content;
   }
 }
