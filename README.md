@@ -30,7 +30,7 @@ OhMyDocAgent 是一个面向企业团队的 AI 知识工作台：上传 PDF / Wo
 <h2 align="center">
   <a href="http://ohmydocagent.xyz">👉直接访问已部署网站👈</a>
 </h2>
-
+服务器4核16G，没有GPU（穷苦学生没钱租贵的இ௰இ），OCR等都是跑在CPU的，有点慢可以等一等
 
 ## ✨ 核心能力
 
