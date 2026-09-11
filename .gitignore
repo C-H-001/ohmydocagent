@@ -7,8 +7,19 @@ coverage/
 
 # 环境与密钥
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+*.bundle
+*.dump
+*.sql.gz
+.secrets/
+secrets/
+private-backups/
 
 # 系统
 .DS_Store
@@ -25,9 +36,16 @@ worktrees/
 backend/uploads/
 
 # 内部文档（不入库）
+AGENTS.md
+CLAUDE.md
+.claude/
+.codex/
+.agents/
+.figma/
 server-operations.md
 handoff-prompt.md
 figma-design-prompt.md
+/frontend/src/imports/image.png
 
 # 本地测试与评测
 /backend/test/

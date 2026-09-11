@@ -1,7 +1,4 @@
-// 前端构建配置（frontend/vite.config.ts）
-// 说明：原型自带的 Figma Make Kit 插件体系（.figma/ 下的预览/故事工具链）与
-// 产品无关，本文件改为标准 Vite + React + Tailwind v4 配置，保留原型同款
-// alias（@ → ./src）与 dev server 行为，并新增 /api 代理 → 后端 3000。
+// Vite + React + Tailwind v4：@ 指向 src，开发环境 /api 代理到本地后端。
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"

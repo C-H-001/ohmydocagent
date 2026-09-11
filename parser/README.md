@@ -34,9 +34,8 @@
 - 解析进程以 root 运行（内部专用服务）
 - 构建：`docker build -t ohmydocagent/parser:fixed -f parser/Dockerfile .`
 
-## 生产部署实测（阿里云 ECS，CPU）
+## 运行配置
 
-- **mineru 引擎可用** ✅（~6.5s/页 CPU 推理）
 - 部署注意：compose 内 backend 配 `PARSER_URL=parser:50051` + `PARSER_FILE_BASE_URL=http://backend:3000`；生产 `.env` 设 `PARSER_ENGINE=mineru`（默认已 mineru）
 - VLM 图片描述（可选）：`.env` 设 `PARSER_VLM_ENDPOINT` / `PARSER_VLM_MODEL` / `PARSER_VLM_API_KEY`；未设时解析结果保留图片资源，但不生成描述。VLM 请求失败时保留资源并返回警告。多图文档使用批量并发描述，后端 gRPC 超时为 600s（`GRPC_TIMEOUT_MS`）。
 

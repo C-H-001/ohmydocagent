@@ -1,6 +1,6 @@
 # OhMyDocAgent 生产部署 compose（单机）
 # 用法：cp .env.example .env 并填写；docker compose -f docker-compose.production.yml up -d
-# 数据卷建议挂到数据盘 /data（见 server-operations.md 挂载说明）
+# 数据卷建议挂到独立数据盘，并按部署环境配置持久化路径。
 name: ohmydocagent
 
 services:
@@ -67,7 +67,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       UPLOAD_DIR: /data/uploads
-      # 初始化安全（Task 0.5 登记项）：生产设置 INIT_TOKEN 后 /auth/init 需校验
+      # 初始化安全：生产设置 INIT_TOKEN 后 /auth/init 需校验
       INIT_TOKEN: ${INIT_TOKEN:-}
       # 真实解析服务（gRPC，见 parser/README.md）
       PARSER_URL: ${PARSER_URL:-}
@@ -110,7 +110,7 @@ services:
     restart: unless-stopped
 
   # 真实解析服务（MinerU 引擎，镜像 ohmydocagent/parser:fixed，见 parser/README.md）
-  # 注意：CPU 推理吃资源（4C14G 无 GPU）——按需启用；后端配 PARSER_URL=parser:50051
+  # CPU 解析较耗资源，请按文档规模预留容量；后端配 PARSER_URL=parser:50051
   parser:
     image: ohmydocagent/parser:fixed
     ports: ["127.0.0.1:50051:50051"]

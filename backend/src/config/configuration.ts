@@ -1,11 +1,10 @@
 // backend/src/config/configuration.ts
 // 集中读取环境变量的配置工厂，各模块通过 ConfigService 获取配置
 //
-// .env 读取位置说明（已实测）：
+// .env 读取位置说明：
 // 本仓库为 npm workspaces monorepo，无论从根目录 `npm --workspace backend run ...`
 // 还是 `cd backend && npm run ...` 启动，脚本进程 cwd 都是 backend 目录
-// （实测输出：cwd=F:\OhMyDocAgent_pi\backend），因此 ConfigModule 默认的
-// `envFilePath: ['.env']` 指向 backend/.env，无需额外处理。
+// 因此 ConfigModule 默认的 `envFilePath: ['.env']` 指向 backend/.env。
 // 同理，UPLOAD_DIR=uploads 是相对 backend 目录的路径（见根 .gitignore）。
 //
 // 本工厂函数会读取用户实体中的 Role 枚举（纯常量，无副作用），用于注册默认角色配置。

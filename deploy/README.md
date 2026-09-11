@@ -2,8 +2,6 @@
 
 本目录的 `docker-compose.yml` 用于启动 OhMyDocAgent 后端开发所需的本地基础设施：PostgreSQL（含 pgvector）、Redis、MinIO、Neo4j。
 
-> 来源说明：本文件从 `F:\OhMyDocAgent\.worktrees\ohmydocagent-foundation\deploy\docker-compose.yml` 拷贝而来（`name: ohmydocagent-local`），并保持与源一致。
-
 ## 快速开始
 
 ```bash
@@ -26,14 +24,11 @@ docker compose down -v      # 停止并删除数据卷（清空数据）
 
 > 安全说明：所有端口均只绑定到 `127.0.0.1`，不对外暴露。密码为本地开发用弱口令，请勿用于生产。
 
-## 账号与连接信息
+## 连接配置
 
-| 服务     | 地址                  | 账号   | 密码                    | 说明                                    |
-| -------- | --------------------- | ------ | ----------------------- | --------------------------------------- |
-| postgres | `127.0.0.1:5432`      | ohmydocagent | `ohmydocagent`               | 数据库名：`ohmydocagent`                     |
-| redis    | `127.0.0.1:6379`      | 无     | 无                      | 无需认证                                |
-| minio    | `127.0.0.1:9000/9001` | ohmydocagent | `ohmydocagent-local-secret`  | 控制台地址：`http://127.0.0.1:9001`     |
-| neo4j    | `127.0.0.1:7474`      | neo4j  | `ohmydocagent-local-secret`  | Browser 地址：`http://127.0.0.1:7474`   |
+本地开发配置见 `docker-compose.yml` 与 `../backend/.env.example`。其中的演示凭据只适用于隔离的本地环境，不是在线网站的登录账号或生产凭据。
+
+生产部署使用 `docker-compose.production.yml`，先复制 `.env.example` 为 `.env`，为数据库、对象存储及应用密钥分别设置独立的随机值。真实配置仅保存在部署环境中，不提交 Git。
 
 ## 连通性自检命令
 
@@ -49,7 +44,8 @@ docker compose exec postgres psql -U ohmydocagent -d ohmydocagent -c \
 docker compose exec redis redis-cli ping
 
 # Neo4j（应输出 ok=1）
-docker compose exec neo4j cypher-shell -u neo4j -p ohmydocagent-local-secret "RETURN 1 AS ok"
+docker compose exec neo4j cypher-shell -u neo4j
+# 按提示输入本地配置的密码，再执行：RETURN 1 AS ok;
 ```
 
 ## 数据持久化
@@ -62,7 +58,7 @@ docker compose exec neo4j cypher-shell -u neo4j -p ohmydocagent-local-secret "RE
 - 如需彻底清空数据，执行 `docker compose down -v`（会删除全部命名卷）。
 - pgvector 扩展在 postgres 数据卷**首次初始化**时由 `initdb/init.sql` 自动创建（`CREATE EXTENSION IF NOT EXISTS vector;`），无需手工执行；注意 initdb 脚本仅在首次初始化数据卷时执行，已有数据卷不会重复执行。
 
-## 镜像调整记录
+## 启动问题
 
-- 若 `neo4j:2025.10.1` 拉取缓慢或失败，可将 compose 中 neo4j 的 `image` 改为本机已有的 `neo4j:2026.06.0-community`。当前环境本地已有 `neo4j:2025.10.1` 镜像且启动成功，故保持默认镜像不变。
+- 镜像拉取失败时，请检查容器镜像源和网络连接；更换镜像版本前应验证数据与配置兼容性。
 - MinIO 为可选服务（本项目用本地存储），启动失败**不影响其余服务**，可单独重试：`docker compose up -d minio`。
