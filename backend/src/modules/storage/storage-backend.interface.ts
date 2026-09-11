@@ -1,7 +1,7 @@
 // storage-backend.interface.ts
 // 存储后端抽象（Task: MinIO 对象存储支持）：本地磁盘与 MinIO 实现同一契约。
 // 路径语义：一律用**相对路径**（如 `{kbId}/{knowledgeId}/{knowledgeId}.pdf`、
-// `attachments/{sessionId}/{attachmentId}.png`）——数据库只存相对路径，
+// `{kbId}/{knowledgeId}/images/{assetKey}.png`）——数据库只存相对路径，
 // 后端负责映射到实际存储（本地：UPLOAD_DIR 下；MinIO：bucket 内对象 key）。
 import { Readable } from 'node:stream';
 
@@ -23,12 +23,6 @@ export interface StorageBackend {
     assetKey: string,
     buffer: Buffer,
     mimeType: string,
-  ): Promise<string>;
-  /** 保存会话附件：返回相对路径 */
-  saveAttachment(
-    file: UploadedFileLike,
-    sessionId: string,
-    attachmentId: string,
   ): Promise<string>;
   /** 删除单个对象/文件（幂等） */
   remove(relativePath: string): Promise<void>;

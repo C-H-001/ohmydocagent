@@ -102,7 +102,7 @@ export interface ChatModelService {
   ): AsyncIterable<ChatStreamChunk>;
 }
 
-/** ChatModelService 的 DI 令牌：Symbol 防字符串撞名（与 EMBEDDING_SERVICE 同约定）。
+/** ChatModelService 的 DI 令牌：Symbol 防字符串撞名。
  * 注：TS interface 是编译期类型、运行时被擦除，不能直接作为 provider token——
  * 故用 Symbol 令牌 + useClass 绑定（见 ModelModule），Task 2.3 换真实实现时
  * 只改 ModelModule 的 useClass，管线与消费方零改动 */

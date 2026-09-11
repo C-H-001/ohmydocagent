@@ -12,7 +12,6 @@ import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsOptional,
   IsString,
   IsUUID,
@@ -27,16 +26,7 @@ export class SendMessageDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   content: string;
 
-  /** Web 搜索开关（Task 2.8）：默认 true（开启）；false 时 Agent 系统提示与
-   * 工具定义不含 web_search（LLM 无联网能力）——前端可提供开关。可选字段：
-   * 缺省/非布尔值（校验拦截非法类型）按 true 处理 */
-  @IsOptional()
-
-  /** 附件 id 列表（Task 2.9）：发送消息引用已上传附件（图片/文件）——编排器
-   * 把附件信息拼入 user 消息上下文（图片多模态 P2 先文本占位降级，见
-   * agent-orchestrator.service.ts buildAttachmentHint 注释）。宽容语义：
-   * 不存在/跨会话/他人的 id 被忽略（附件加载按会话 + 归属过滤，见
-   * attachment.service.ts listByIds 注释） */
+  /** 兼容输入：保留附件 id 数组的格式与数量校验；当前不参与消息生成。 */
   @IsOptional()
   @IsArray({ message: 'attachmentIds 必须是数组' })
   @ArrayMaxSize(20, { message: 'attachmentIds 最多 20 个' })

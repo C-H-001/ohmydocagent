@@ -11,7 +11,7 @@
 //     generating 状态），发送体与 DTO 对齐（mention/attachment）。
 
 import { useCallback, useRef, useState } from "react"
-import { ApiError, BASE_URL, getAccessToken } from "../api/client"
+import { BASE_URL, getAccessToken } from "../api/client"
 import type { RagReference } from "../api/chat"
 
 // ---------------------------------------------------------------------------

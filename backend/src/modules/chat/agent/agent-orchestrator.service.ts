@@ -73,7 +73,6 @@ import type {
   Tool,
   ToolExecutionResult,
 } from './tools/tool.interface.js';
-import { MENTION_ONLY_PLACEHOLDER } from './agent.types.js';
 
 /** ReAct 循环轮数上限：最多 8 轮 LLM 调用（每轮可含工具执行；第 9 轮被
  * 拦截 → 以已累积文本强制完成——防止模型陷入工具调用死循环烧 token。

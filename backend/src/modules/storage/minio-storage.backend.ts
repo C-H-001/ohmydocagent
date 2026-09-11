@@ -1,12 +1,12 @@
 // minio-storage.backend.ts
 // MinIO 对象存储后端（S3 兼容）：上传文件存入 bucket 对象（key=相对路径），
-// 删除/读取按对象操作。路径语义与本地后端一致（`{kbId}/{knowledgeId}/...`、
-// `attachments/{sessionId}/...`），数据库只存相对路径——两个后端可无缝切换。
+// 删除/读取按对象操作。路径语义与本地后端一致（`{kbId}/{knowledgeId}/...`），
+// 数据库只存相对路径——两个后端可无缝切换。
 //
 // 安全设计（与本地后端对齐）：
 // 1. key 由服务端 UUID 组成（{kbId}/{knowledgeId}/{knowledgeId}.{ext}），
 //    原始文件名不参与——无路径穿越/重名覆盖注入面
-// 2. kbId/knowledgeId/sessionId/attachmentId 校验 UUID 格式 + 小写规范化
+// 2. kbId/knowledgeId 校验 UUID 格式 + 小写规范化
 // 3. 扩展名白名单（仅字母数字）
 // 4. remove/removeKbDirectory 对不存在对象幂等（MinIO 删除不存在对象不报错）
 import { BadRequestException, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
@@ -109,29 +109,6 @@ export class MinioStorageBackend implements StorageBackend, OnApplicationBootstr
     const key = `${kbId}/${knowledgeId}/images/${hasExt ? safe : safe + ext}`;
     await this.client.putObject(this.bucket, key, buffer, buffer.length, {
       'Content-Type': mimeType || 'application/octet-stream',
-    });
-    return key;
-  }
-
-  /** 保存会话附件：attachments/{sessionId}/{attachmentId}.{ext} */
-  async saveAttachment(
-    file: UploadedFileLike,
-    sessionId: string,
-    attachmentId: string,
-  ): Promise<string> {
-    sessionId = sessionId.toLowerCase();
-    attachmentId = attachmentId.toLowerCase();
-    if (!UUID_RE.test(sessionId) || !UUID_RE.test(attachmentId)) {
-      throw new BadRequestException('非法的会话/附件 id');
-    }
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!/^\.[a-z0-9]{1,10}$/.test(ext)) {
-      throw new BadRequestException('不支持的文件类型');
-    }
-    await this.ensureBucket();
-    const key = `attachments/${sessionId}/${attachmentId}${ext}`;
-    await this.client.putObject(this.bucket, key, file.buffer, file.size, {
-      'Content-Type': file.mimetype ?? 'application/octet-stream',
     });
     return key;
   }

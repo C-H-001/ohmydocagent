@@ -1,7 +1,6 @@
 // 模型模块（Task 1.6 + Task 1.7 + Task 2.3）：
-// - 提供 EmbeddingService / ChatModelService 抽象的实现（Task 2.3 起为真实
-//   实现 EmbeddingServiceImpl / ChatModelServiceImpl，按默认模型配置路由到
-//   对应供应商，见各实现注释）。
+// - 提供 EmbeddingProfileService（按知识库 profile 向量化）与
+//   ChatModelServiceImpl（按默认对话模型配置路由到供应商）。
 // - 模型管理（Task 2.3）：Model 实体 + CRUD + 默认模型 + 连通性测试端点
 //   （ModelController/ModelService/CryptoService/供应商实现/工厂）。
 // 依赖方向：本模块被 ParseModule（向量化/摘要管线）与 ChatModule（标题生成）
@@ -11,8 +10,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CHAT_MODEL_SERVICE } from './chat-model.interface.js';
 import { ChatModelServiceImpl } from './chat-model.service.js';
 import { CryptoService } from './crypto.service.js';
-import { EMBEDDING_SERVICE } from './embedding.interface.js';
-import { EmbeddingServiceImpl } from './embedding.service.js';
 import { ModelController } from './model.controller.js';
 import { Model } from './model.entity.js';
 import { ModelService } from './model.service.js';
@@ -39,10 +36,8 @@ import { EmbeddingProfileService } from './embedding-profile.service.js';
     LLMProviderFactory,
     // LLM 抽象绑定（默认真实实现）
     { provide: CHAT_MODEL_SERVICE, useClass: ChatModelServiceImpl },
-    { provide: EMBEDDING_SERVICE, useClass: EmbeddingServiceImpl },
   ],
   exports: [
-    EMBEDDING_SERVICE,
     CHAT_MODEL_SERVICE,
     CryptoService,
     ModelService,

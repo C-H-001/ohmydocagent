@@ -9,7 +9,7 @@
 //   匹配，查询端点仍用 startNode()/endNode()）；副作用：不支持实体重命名
 //   （重命名需同步改写所有关联边的 fromId/toId，当前不做该能力）。
 
-/** upsertEntity 入参：attributes/chunkId 均为追加合并语义（重复项去重） */
+/** 实体写入结构：DocumentGraphInput 复用行字段，attributes/chunkId 追加去重 */
 export interface UpsertEntityInput {
   kbId: string;
   name: string;
@@ -19,7 +19,7 @@ export interface UpsertEntityInput {
   chunkId: string;
 }
 
-/** upsertRelationship 入参：同边重复写入时 weight 累加、chunkId 追加去重 */
+/** 关系写入结构：DocumentGraphInput 复用行字段，weight 累加、chunkId 追加去重 */
 export interface UpsertRelationshipInput {
   kbId: string;
   /** 起始实体名（须已存在，见仓储方法注释） */
@@ -39,7 +39,7 @@ export interface UpsertRelationshipInput {
   chunkId: string;
 }
 
-/** upsertChunkMirror 入参：content 重复写入时更新为最新值 */
+/** chunk 镜像写入结构：DocumentGraphInput 复用行字段，content 更新为最新值 */
 export interface UpsertChunkMirrorInput {
   id: string;
   kbId: string;
@@ -116,12 +116,6 @@ export interface GraphStats {
   chunks: number;
 }
 
-/** findChunkIdsForEntities 命中项（Task 3.4 图谱增强检索用） */
-export interface EntityChunkHit {
-  entity: string;
-  chunkIds: string[];
-}
-
 /**
  * 图谱召回结果（GraphRAG，Task: 参考 WeKnora ENTITY_SEARCH）：
  * query 实体词 CONTAINS 命中实体 + 一跳邻居 + 关系，聚合各自关联 chunk。
@@ -148,7 +142,7 @@ export interface GraphRetrieveResult {
  * 冗余的 kbId/knowledgeId）。
  */
 export interface DocumentGraphInput {
-  /** 实体行：与 upsertEntity 同语义（MERGE 幂等、attributes/chunkIds 追加去重） */
+  /** 实体行：MERGE 幂等、attributes/chunkIds 追加去重 */
   entities: Array<Omit<UpsertEntityInput, 'kbId'>>;
   /** 关系行：端点须已存在（本批 entities 或既有实体），缺失则抛错整体回滚 */
   relationships: Array<Omit<UpsertRelationshipInput, 'kbId'>>;

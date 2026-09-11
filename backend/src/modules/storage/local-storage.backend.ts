@@ -71,28 +71,6 @@ export class LocalStorageBackend implements StorageBackend {
     return `${kbId}/${knowledgeId}/images/${filename}`;
   }
 
-  /** 保存会话附件：UPLOAD_DIR/attachments/{sessionId}/{attachmentId}.{ext} */
-  async saveAttachment(
-    file: UploadedFileLike,
-    sessionId: string,
-    attachmentId: string,
-  ): Promise<string> {
-    sessionId = sessionId.toLowerCase();
-    attachmentId = attachmentId.toLowerCase();
-    if (!UUID_RE.test(sessionId) || !UUID_RE.test(attachmentId)) {
-      throw new BadRequestException('非法的会话/附件 id');
-    }
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (!/^\.[a-z0-9]{1,10}$/.test(ext)) {
-      throw new BadRequestException('不支持的文件类型');
-    }
-    const dir = path.join(this.uploadDir, 'attachments', sessionId);
-    await mkdir(dir, { recursive: true });
-    const filename = `${attachmentId}${ext}`;
-    await writeFile(path.join(dir, filename), file.buffer);
-    return `attachments/${sessionId}/${filename}`;
-  }
-
   /** 删除文件（幂等：不存在静默） */
   async remove(relativePath: string): Promise<void> {
     if (!relativePath) return;

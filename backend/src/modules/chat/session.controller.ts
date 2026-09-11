@@ -1,7 +1,7 @@
 // 会话路由（Task 2.1 + Task 2.9，全部需登录——全局 JwtAuthGuard 默认拦截）：
 // POST /chat/sessions 创建（201，默认标题「新会话」）、GET /chat/sessions 分页列表
 // （置顶优先 + 消息数聚合）、GET /chat/sessions/:id 详情、PUT /chat/sessions/:id 更新
-// （重命名/更新 kbIds/置顶）、DELETE /chat/sessions/:id 删除（级联删消息 + 附件，204）、
+// （重命名/更新 kbIds/置顶）、DELETE /chat/sessions/:id 删除（级联删消息，204）、
 // DELETE /chat/sessions/batch 批量删除（宽容：只删本人的）、
 // DELETE /chat/sessions/:id/messages 清空消息（会话保留，204）、
 // GET /chat/sessions/:id/messages 消息列表（createdAt 升序分页）、
@@ -34,14 +34,10 @@ import {
   Put,
   Query,
   Res,
-  UploadedFile,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { User } from '../users/user.entity.js';
-import { UploadedFileLike } from '../storage/storage.service.js';
 import { BatchDeleteSessionsDto } from './dto/batch-delete-sessions.dto.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { ListSessionDto } from './dto/list-session.dto.js';
@@ -58,8 +54,6 @@ export class SessionController {
     private readonly sessionService: SessionService,
     // Task 2.4：对话生成编排（流式回路，见 chat-orchestrator.service.ts）
     private readonly orchestrator: ChatOrchestratorService,
-    // Task 2.9：附件上传/列表（归属校验与白名单在服务层，见
-    // attachment.service.ts 文件头注释）
     // Task 2.10：生成注册表——POST :id/stop 经 registry.stop abort 活动生成
     // （归属校验仍走 sessionService.getById，见 stopGeneration 注释）
     private readonly generationRegistry: GenerationRegistry,
@@ -175,7 +169,6 @@ export class SessionController {
    * runStream（createUserMessage 内还有一次事务内归属校验作为并发兜底——
    * 会话在两次校验间被删的极端竞态下，异常过滤器会尝试写 JSON 撞已发送
    * headers，属可接受的罕见竞态，注释说明）。
-   * 决定是否注入 web_search 工具，见 agent-orchestrator.service.ts）。
    */
   @Post(':id/messages')
   async sendMessage(
@@ -187,11 +180,9 @@ export class SessionController {
     // 前置归属校验：SSE headers 发送前暴露 404/403（异常过滤器正常写 JSON）
     await this.sessionService.getById(id, user.id);
     const sse = new SseService(res);
-    // Task 2.9：附件引用（attachmentIds → user 消息上下文占位）与 @提及范围
-    // （mentionKbIds/mentionKnowledgeIds 显式数组 + content 内嵌 @kb:/@file:
-    // 解析合并，见 agent-orchestrator.service.ts 注释；联网搜索已删除）
+    // @提及范围：mentionKbIds/mentionKnowledgeIds 显式数组 + content 内嵌
+    // @kb:/@file: 解析合并，见 agent-orchestrator.service.ts 注释。
     await this.orchestrator.runStream(id, user.id, dto.content, sse, {
-      attachmentIds: dto.attachmentIds,
       mentionKbIds: dto.mentionKbIds,
       mentionKnowledgeIds: dto.mentionKnowledgeIds,
     });

@@ -263,13 +263,14 @@ export class ChunkService {
       'SELECT id FROM knowledge_bases WHERE id=$1 FOR SHARE',
       [chunk.kbId],
     );
+    const keywords = segment(content); // 编辑后重分词，两种检索字段复用同一结果
     const result = await manager.update(
       Chunk,
       { id: chunk.id },
       {
         content,
-        keywords: segment(content), // 编辑后重分词（检索词随内容更新）
-        keywordText: segment(content).join(' '),
+        keywords,
+        keywordText: keywords.join(' '),
         contentRevision: newRevision,
         indexStatus: 'processing',
       },

@@ -1311,25 +1311,38 @@ function DocPreviewDrawer({
   // 原文（右侧栏）：file 类型打开即加载原文件（fetch blob → blob URL 供 iframe/img）
   const [originalUrl, setOriginalUrl] = useState<string | null>(null)
   const [originalErr, setOriginalErr] = useState("")
+  // 只跟踪当前文档的文件身份；摘要等元数据刷新不应重载阅读器。
+  const originalFile = detail?.id === doc.id && detail.kbId === kbId && detail.type === "file" ? detail : null
+  const originalFileId = originalFile?.id
+  const originalFilePath = originalFile?.filePath
+  const originalFileType = originalFile?.fileType
   useEffect(() => {
-    if (!detail || detail.type !== "file") return
+    setOriginalUrl(null)
+    setOriginalErr("")
+    if (!originalFileId) return
     let alive = true
+    let objectUrl: string | null = null
+    const controller = new AbortController()
     const token = getAccessToken()
-    fetch(`${BASE_URL}/kbs/${kbId}/knowledge/${doc.id}/file`, {
+    fetch(`${BASE_URL}/kbs/${kbId}/knowledge/${originalFileId}/file`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok) { if (alive) setOriginalErr(`原文件加载失败（${res.status}）`); return }
         const blob = await res.blob()
         if (!alive) return
-        setOriginalUrl(URL.createObjectURL(blob))
+        objectUrl = URL.createObjectURL(blob)
+        setOriginalUrl(objectUrl)
         setOriginalErr("")
       })
       .catch(() => { if (alive) setOriginalErr("原文件加载失败，请稍后重试") })
-    return () => { alive = false }
-  }, [detail, kbId, doc.id])
-
-  useEffect(() => () => { if (originalUrl) URL.revokeObjectURL(originalUrl) }, [originalUrl])
+    return () => {
+      alive = false
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [kbId, originalFileId, originalFilePath, originalFileType])
 
   // 打开即拉取详情 + 时间线 + 分块
   useEffect(() => {
@@ -2209,7 +2222,7 @@ function KbSettingsModal({ kb, initialTab, onClose }: { kb: KnowledgeBase; initi
     if (saving || !name.trim() || activeTab === "embedding") return
     setSaving(true)
     try {
-      await kbApi.getKb(kb.id) // 预热：详情路由权限（无实际副作用）
+      await kbApi.getKb(kb.id) // 校验详情访问权限，并记录最近访问
       const payload: Record<string, unknown> = { name: name.trim(), description: description.trim() }
       if (activeTab === "chunking") {
         payload.chunkingConfig = {

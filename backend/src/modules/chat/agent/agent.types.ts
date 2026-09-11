@@ -68,10 +68,6 @@ export interface ToolCallRecord {
 /** Agent 运行选项（POST /chat/sessions/:id/messages 透传，见
  * send-message.dto.ts） */
 export interface AgentRunOptions {
-  /** 附件 id 列表（Task 2.9）：发送消息引用的已上传附件（图片/文件）——
-   * user 消息上下文追加「[图片附件]/[附件] 文件名：xxx」占位（图片多模态
-   * P2 先文本降级，见 agent-orchestrator.service.ts buildAttachmentHint 注释） */
-  attachmentIds?: string[];
   /** @提及知识库范围（Task 2.9，前端 @选择器生成）：与 content 内嵌 @kb:xxx
    * 解析结果合并去重（双通道），见 agent-orchestrator.service.ts run 注释 */
   mentionKbIds?: string[];

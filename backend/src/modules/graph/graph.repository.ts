@@ -14,7 +14,7 @@
 //   toNumber() 辅助统一两种形态（见文件尾）。
 //
 // 并发约定（重要，Task 3.2 并行抽取的第一个踩坑点）：
-// upsertRelationship / upsertDocumentGraphInTx 的 ON MATCH weight 累加
+// upsertDocumentGraphInTx 的 ON MATCH weight 累加
 // （r.weight = r.weight + $weight）依赖单条 Cypher 语句原子执行（读时一致，
 // 语句内不会读到中间态），但两个并发事务同时累加同一条边时仍存在
 // 「读旧值-写新值」竞态，可能互相覆盖（丢一次累加）。当前约定：按 KB 串行化
@@ -27,15 +27,11 @@ import neo4j from 'neo4j-driver';
 import { Neo4jService } from '../../neo4j/neo4j.service.js';
 import type {
   DocumentGraphInput,
-  EntityChunkHit,
   EntityDetail,
   EntitySearchResult,
   GraphNode,
   GraphStats,
   Subgraph,
-  UpsertChunkMirrorInput,
-  UpsertEntityInput,
-  UpsertRelationshipInput,
 } from './graph.types.js';
 
 /** getSubgraph 默认/上限：P1 规模单 KB 实体数有限，100 已覆盖可视化预览 */
@@ -102,85 +98,13 @@ export class GraphRepository implements OnApplicationBootstrap {
   }
 
   /**
-   * upsert 实体：MERGE (kbId, name) ——唯一约束保证幂等（重复写入不堆节点）。
-   * ON CREATE 全量初始化；ON MATCH 追加 attributes/chunkIds 并去重
-   * （`[x IN $attributes WHERE NOT x IN e.attributes] + e.attributes`：
-   * 纯 Cypher 去重，不依赖 APOC）。
-   * null 守卫：e.chunkIds/e.attributes 为 null 时（正常管线不可达，防御外部
-   * 写入/历史脏数据）先初始化——否则 `null + [$chunkId]` 在 Cypher 里恒为 null，
-   * 会把列表静默抹成 null。
-   */
-  async upsertEntity(input: UpsertEntityInput): Promise<void> {
-    const { kbId, name, attributes, chunkId } = input;
-    await this.neo4j.run(
-      `MERGE (e:Entity { kbId: $kbId, name: $name })
-       ON CREATE SET e.attributes = $attributes, e.chunkIds = [$chunkId]
-       ON MATCH SET e.attributes = CASE WHEN e.attributes IS NULL THEN $attributes
-                                        ELSE [x IN $attributes WHERE NOT x IN e.attributes] + e.attributes END,
-                    e.chunkIds = CASE WHEN e.chunkIds IS NULL THEN [$chunkId]
-                                      WHEN $chunkId IN e.chunkIds THEN e.chunkIds
-                                      ELSE e.chunkIds + [$chunkId] END`,
-      { kbId, name, attributes, chunkId },
-    );
-  }
-
-  /**
-   * upsert 关系：边只连已存在的实体（前置 upsertEntity，Task 3.2 管线保证顺序）。
-   * 用 MATCH 定位端点而非 MERGE 建实体——避免隐式创建「孤岛」实体；端点不存在时
-   * MATCH 无行 → MERGE 不执行，此处显式抛错（防 Task 3.2 管线静默丢边）。
-   * MERGE 边（type+fromId+toId+kbId 复合唯一，见 initSchema）：
-   * ON CREATE 初始化 weight/chunkIds；ON MATCH weight 累加、chunkId 追加去重
-   * （null 守卫：r.chunkIds 为 null 时先初始化，防 Cypher `null + [x]` 恒为 null 抹除）。
-   * 并发约定（Task 3.2 并行抽取第一个踩坑点）：ON MATCH weight 累加依赖单条语句
-   * 读时一致，并发同边写入可能互相覆盖——按 KB 串行化 GRAPH 任务或失败重试，
-   * 未来并行需改显式事务/列表读改写（详见文件头「并发约定」）。
-   * 参数名用 fromName/toName/relType（from/type 是 Cypher 关键字，规避歧义）。
-   * 注意：MERGE 必须以 RETURN r 收尾——实测（Neo4j 2025.10 + driver v6）写子句
-   * 结尾的查询 records 恒为空（即使建边成功，见 counters），无 RETURN 时
-   * 「实体不存在」守卫无法区分成功/失败，会误报并让调用方以为边没建成。
-   */
-  async upsertRelationship(input: UpsertRelationshipInput): Promise<void> {
-    const { kbId, from, to, type, weight, chunkId } = input;
-    const result = await this.neo4j.run(
-      `MATCH (a:Entity { kbId: $kbId, name: $fromName })
-       MATCH (b:Entity { kbId: $kbId, name: $toName })
-       MERGE (a)-[r:RELATES_TO { type: $relType, fromId: $fromName, toId: $toName, kbId: $kbId }]->(b)
-       ON CREATE SET r.weight = $weight, r.chunkIds = [$chunkId]
-       ON MATCH SET r.weight = r.weight + $weight,
-                    r.chunkIds = CASE WHEN $chunkId IN r.chunkIds THEN r.chunkIds
-                                      ELSE r.chunkIds + [$chunkId] END
-       RETURN r`,
-      { kbId, fromName: from, toName: to, relType: type, weight, chunkId },
-    );
-    if (result.records.length === 0) {
-      throw new Error(
-        `关系写入失败：实体不存在（${from} → ${to}，需先 upsertEntity）`,
-      );
-    }
-  }
-
-  /**
-   * upsert chunk 镜像节点（轻量反查镜像，非分块本体）：MERGE (id, kbId)，
-   * content 重复写入更新为最新值（文档重解析时镜像同步刷新）。
-   */
-  async upsertChunkMirror(input: UpsertChunkMirrorInput): Promise<void> {
-    const { id, kbId, knowledgeId, content } = input;
-    await this.neo4j.run(
-      `MERGE (c:Chunk { id: $id, kbId: $kbId })
-       ON CREATE SET c.knowledgeId = $knowledgeId, c.content = $content
-       ON MATCH SET c.content = $content, c.knowledgeId = $knowledgeId`,
-      { id, kbId, knowledgeId, content },
-    );
-  }
-
-  /**
    * 单个文档的整图批量写入（Task 3.2 抽取处理器调用）：实体×N + 边×M +
    * chunk 镜像×K 在一个写事务内执行（Neo4jService.withWriteTransaction）——
    * 全成功或全回滚，杜绝逐条 run() 中途失败留部分写入（Task 3.2 前置要求）。
-   * 幂等语义与单条 upsert 完全一致：实体 MERGE (kbId,name)、attributes/chunkIds
+   * 写入语义：实体 MERGE (kbId,name)、attributes/chunkIds
    * 追加去重（含 null 守卫）；边按 (type,fromId,toId,kbId) MERGE、weight 累加；
    * chunk 镜像 MERGE (id,kbId)、content 更新。
-   * 并发约定同 upsertRelationship（ON MATCH weight 累加依赖读时一致），
+   * ON MATCH weight 累加依赖读时一致，
    * 调用方须保证按 KB 串行化 GRAPH 写入或失败重试（见文件头「并发约定」）。
    * 端点守卫：关系行的端点须已存在（本批 entities 或既有实体）——UNWIND+MATCH
    * 对缺失端点静默丢行，用 RETURN count(*) 与入参行数比对，不一致即抛错回滚。
@@ -199,7 +123,7 @@ export class GraphRepository implements OnApplicationBootstrap {
       return;
     }
     await this.neo4j.withWriteTransaction(async (tx) => {
-      // 1. 实体：UNWIND 批量 MERGE（null 守卫与单条 upsertEntity 同源）
+      // 1. 实体：UNWIND 批量 MERGE（null 守卫防历史空属性抹除列表）
       if (input.entities.length > 0) {
         await tx.run(
           `UNWIND $rows AS row
@@ -537,23 +461,6 @@ export class GraphRepository implements OnApplicationBootstrap {
           chunkIds: ((n as { chunkIds?: string[] }).chunkIds ?? []).filter(Boolean),
           relationType: (n as { relationType: string }).relationType,
         })),
-    }));
-  }
-
-  async findChunkIdsForEntities(
-    kbId: string,
-    keywords: string[],
-  ): Promise<EntityChunkHit[]> {
-    if (keywords.length === 0) return [];
-    const result = await this.neo4j.run(
-      `MATCH (e:Entity { kbId: $kbId })
-       WHERE e.name IN $keywords
-       RETURN e.name AS name, e.chunkIds AS chunkIds`,
-      { kbId, keywords },
-    );
-    return result.records.map((rec) => ({
-      entity: rec.get('name') as string,
-      chunkIds: (rec.get('chunkIds') as string[]) ?? [],
     }));
   }
 

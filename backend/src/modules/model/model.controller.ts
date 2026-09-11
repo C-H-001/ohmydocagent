@@ -6,8 +6,7 @@
 // - POST /models/test 连通性测试（body 完整配置，不保存）、
 //   POST /models/:id/test 已保存模型连通性测试、
 //   POST /models/:id/debug 模型调试（固定测试消息返回生成文本）
-// 权限（用户需求：模型管理归 super）：列表/详情所有登录用户可用（聊天模型
-// 选择器依赖 GET /models），新增/更新/删除/默认/测试/调试仅 super（@Roles 标注）。
+// 权限：当前用户 id/role 传给 ModelService，按 BYOK 归属与全局模型规则校验。
 import {
   Body,
   Controller,
@@ -19,8 +18,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { Roles } from '../../common/decorators/roles.decorator.js';
-import { Role, User } from '../users/user.entity.js';
+import { User } from '../users/user.entity.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { CreateModelDto } from './dto/create-model.dto.js';
 import { ListModelDto } from './dto/list-model.dto.js';

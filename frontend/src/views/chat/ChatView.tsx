@@ -22,7 +22,7 @@ import {
   CheckSquare, Pin, PinOff, Network, Zap,
   ExternalLink, Images as ImagesIcon, FileSearch
 } from "lucide-react"
-import { cn, toast, ToastHost } from "../../components/ui"
+import { cn, toast } from "../../components/ui"
 import { api } from "../../api/client"
 import {
   chatApi, listChatModels, listKbsForMention,
@@ -730,7 +730,6 @@ export default function ChatView() {
         onClose={() => setCitationDrawerMsgId(null)}
       />
 
-      <ToastHost />
     </div>
   )
 }
@@ -1258,11 +1257,6 @@ function groupSessions(list: SessionListItem[]): [string, SessionListItem[]][] {
     else groups["更早"].push(s)
   }
   return (Object.entries(groups).filter(([, v]) => v.length > 0))
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 function errMessage(err: unknown): string {

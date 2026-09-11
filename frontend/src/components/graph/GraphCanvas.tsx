@@ -139,10 +139,6 @@ export default function GraphCanvas({
     [nodes, edges, size.width, size.height],
   )
 
-  const nodeById = useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes])
-  const edgeEndpoints = useMemo(() => new Set<string>(), []) // 占位（保留 API 形态）
-  void edgeEndpoints
-
   const highlighted = highlightIds ?? new Set<string>()
 
   return (

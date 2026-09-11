@@ -1,10 +1,10 @@
 // 存储服务门面（Task 1.2 + MinIO 支持）：按 STORAGE_BACKEND 配置委托
 //   local → LocalStorageBackend（既有磁盘实现，见 local-storage.backend.ts）
 //   minio → MinioStorageBackend（对象存储，见 minio-storage.backend.ts）
-// 对外 API 保持一致（save/saveAttachment/remove/removeKbDirectory/removeEmptyDirectory
-// + 新增 readBuffer/createReadStream 供解析/预览读取），调用方无需关心后端差异。
+// 对外 API 保持一致（save/saveImage/remove/removeKbDirectory/removeEmptyDirectory
+// + readBuffer/createReadStream 供解析/预览读取），调用方无需关心后端差异。
 // 路径语义：一律相对路径（{kbId}/{knowledgeId}/{knowledgeId}.{ext}、
-// attachments/{sessionId}/{attachmentId}.{ext}），DB 只存相对路径。
+// {kbId}/{knowledgeId}/images/{assetKey}.{ext}），DB 只存相对路径。
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Readable } from 'node:stream';
@@ -34,14 +34,6 @@ export class StorageService implements StorageBackend {
     knowledgeId: string,
   ): Promise<string> {
     return this.backend.save(file, kbId, knowledgeId);
-  }
-
-  async saveAttachment(
-    file: UploadedFileLike,
-    sessionId: string,
-    attachmentId: string,
-  ): Promise<string> {
-    return this.backend.saveAttachment(file, sessionId, attachmentId);
   }
 
   /** 保存文档图片资产（多模态 asset 落盘，见 storage-backend.interface） */

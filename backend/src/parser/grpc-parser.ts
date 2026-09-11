@@ -9,9 +9,7 @@
 //      Asset/Completed/Error）→ Block 文本按 page/order 重组为 ParsedDocument
 //   3. 配置切换：PARSER_URL 设置后 ParserModule 用本实现替换占位解析器
 //
-// 简化取舍（轻量模式）：
-//   - Asset（图片块）暂不落盘（ParsedDocument 契约无图片字段，后续多模态再扩）
-//   - 失败语义：事件流 Error → 抛错（ParseProcessor 现有失败重试语义承接）
+// Asset 图片字节交给 ParseProcessor 存储；事件流 Error 抛错并沿用任务重试语义。
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { loadSync } from '@grpc/proto-loader';
@@ -39,7 +37,7 @@ const GRPC_TIMEOUT_MS = 600_000; // VLM 多图并发描述可能较慢（600s）
 
 interface ParseEvent {
   progress?: { stage: string; percent: number; message: string };
-  block?: { type: string; text: string; page: number; order: number };
+  block?: { type: string; text: string; page: number; order: number; asset_key?: string };
   asset?: {
     asset_key: string;
     mime_type: string;
@@ -70,7 +68,6 @@ export class GrpcParser implements ParserClient {
     this.fileBaseUrl = (config.get<string>('parserFileBaseUrl') ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
     // 签名密钥：复用 ENCRYPTION_KEY 派生（同 CryptoService 约定，避免新密钥面）
     this.signSecret = config.getOrThrow<string>('encryptionKey');
-    const engine = config.get<string>('parserEngine');
     this.engine = 'mineru';
     this.logger.log(`真实解析服务已接入：${this.engine} @ ${target}（文件基址 ${this.fileBaseUrl}）`);
 
@@ -129,10 +126,17 @@ export class GrpcParser implements ParserClient {
       .map((e) => e.block!)
       .sort((a, b) => (a.page - b.page) || (a.order - b.order));
     const pages = new Map<number, string[]>();
+    const imageBlockTexts = new Map<string, Set<string>>();
     for (const b of blocks) {
       const arr = pages.get(b.page) ?? [];
       if (b.text) arr.push(b.text);
       pages.set(b.page, arr);
+      if (b.asset_key && b.text?.trim()) {
+        const key = JSON.stringify([b.page, b.asset_key]);
+        const texts = imageBlockTexts.get(key) ?? new Set<string>();
+        texts.add(b.text.trim());
+        imageBlockTexts.set(key, texts);
+      }
     }
     // 图片资产收集（Asset 事件：content + VLM description）——对齐 WeKnora
     // ImageMultimodal：content 由 parse.processor 存对象存储并登记 knowledge，
@@ -152,9 +156,12 @@ export class GrpcParser implements ParserClient {
         description: a.description?.trim() || undefined,
         content,
       });
-      if (a.description && a.description.trim()) {
+      const description = a.description?.trim();
+      // parser 可能已将 VLM 描述填入对应图片的 Block；仅去掉同页同图的重复描述。
+      const blockTexts = imageBlockTexts.get(JSON.stringify([a.page, a.asset_key]));
+      if (description && !blockTexts?.has(description)) {
         const arr = descByPage.get(a.page) ?? [];
-        arr.push(a.description.trim());
+        arr.push(description);
         descByPage.set(a.page, arr);
       }
     }

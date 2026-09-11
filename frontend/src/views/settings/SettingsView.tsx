@@ -20,10 +20,10 @@ import {
   Search, Cpu, Play, CheckCircle, XCircle,
   ToggleLeft, ToggleRight, Clock, Key, Activity,
   GitBranch, Globe, User, Settings2, Zap,
-  Mail, Link as LinkIcon, RotateCcw, Database, Server, Gauge,
+  Mail, RotateCcw, Database, Server, Gauge,
   MessageSquare, Pencil
 } from "lucide-react"
-import { cn, toast, ToastHost } from "../../components/ui"
+import { cn, toast } from "../../components/ui"
 import { useAuth } from "../../store/auth"
 import {
   apiKeyApi, auditApi, historyApi, modelApi, profileApi,
@@ -131,7 +131,6 @@ export default function SettingsView() {
           {activeTab === "version" && <VersionSettings />}
         </div>
       </div>
-      <ToastHost />
     </div>
   )
 }
@@ -496,10 +495,6 @@ function ModelsSettings() {
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [showDebug, setShowDebug] = useState<string | null>(null)
-  const [debugging, setDebugging] = useState(false)
-  const [debugResult, setDebugResult] = useState<string | null>(null)
-  const [debugMsg, setDebugMsg] = useState("你好，请简单介绍一下自己。")
   const [form, setForm] = useState<ModelForm>({
     provider: "openai-compatible", name: "", baseUrl: "", apiKey: "", modelName: "", type: "chat",
   })
@@ -602,41 +597,6 @@ function ModelsSettings() {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("确定删除该模型？")) return
-    try {
-      await modelApi.remove(id)
-      toast("模型已删除")
-      void load()
-    } catch (err) {
-      toast(errMessage(err), "error")
-    }
-  }
-
-  const handleSetDefault = async (id: string) => {
-    try {
-      await modelApi.setDefault(id)
-      toast("已设为默认模型")
-      void load()
-    } catch (err) {
-      toast(errMessage(err), "error")
-    }
-  }
-
-  const handleDebug = async () => {
-    if (!showDebug) return
-    setDebugging(true)
-    setDebugResult(null)
-    try {
-      const res = await modelApi.debug(showDebug, debugMsg)
-      setDebugResult(res.response)
-    } catch (err) {
-      setDebugResult(`调试失败：${errMessage(err)}`)
-    } finally {
-      setDebugging(false)
-    }
-  }
-
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -672,7 +632,6 @@ function ModelsSettings() {
           </div>
         </div>
       )}
-      {/* 列表渲染占位（由 ModelList 组件承担） */}
       {/* Edit Model Modal（可重新设置 API Key——此前只有新增/删除，无法修改已有模型） */}
       {editingId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -790,38 +749,6 @@ function ModelsSettings() {
         </div>
       )}
 
-      {/* Debug Modal */}
-      {showDebug && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-xl shadow-2xl w-[520px] p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold">模型调试 — {models.find(m => m.id === showDebug)?.name}</h3>
-              <button onClick={() => { setShowDebug(null); setDebugResult(null) }} className="w-7 h-7 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <textarea
-              rows={3}
-              value={debugMsg}
-              onChange={e => setDebugMsg(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-accent bg-background resize-none mb-3"
-            />
-            <button
-              onClick={() => void handleDebug()}
-              disabled={debugging}
-              className="h-9 px-4 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90 flex items-center gap-2 mb-4 disabled:opacity-60"
-            >
-              {debugging ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-              发起调试调用
-            </button>
-            {debugResult && (
-              <div className="bg-muted/50 border border-border rounded-md p-3 text-xs font-mono text-foreground/90 whitespace-pre-wrap max-h-64 overflow-y-auto">
-                {debugResult}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1733,7 +1660,6 @@ function ModelUsageSettings() {
   )
 }
 
-// ─── 模型配置（普通用户只读视图：查看可用模型与默认模型，无管理操作） ─────────
 // 模型列表（BYOK 分区块共用：我的模型 / 全局默认）
 function ModelList({ items, isSuper, onEdit }: { items: Model[]; isSuper: boolean; onEdit?: (model: Model) => void }) {
   const toast_ = toast
@@ -1826,59 +1752,5 @@ function ModelList({ items, isSuper, onEdit }: { items: Model[]; isSuper: boolea
         )
       })()}
     </>
-  )
-}
-
-function ModelReadonlySettings() {
-  const [models, setModels] = useState<Model[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    modelApi.list().then((res) => { setModels(res); setLoading(false) }).catch(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div className="py-10 text-center text-sm text-muted-foreground">加载中…</div>
-
-  return (
-    <div className="space-y-6">
-      <SectionHeader title="模型配置" desc="当前平台可用的模型（对话 / Embedding / 重排序）。模型管理由系统管理员维护。" />
-      <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-              <th className="px-4 py-2 text-left">模型</th>
-              <th className="px-4 py-2 text-left">类型</th>
-              <th className="px-4 py-2 text-left">模型 ID</th>
-              <th className="px-4 py-2 text-right">状态</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {models.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground text-xs">暂无模型配置</td></tr>
-            ) : models.map((m) => (
-              <tr key={m.id} className="hover:bg-muted/30">
-                <td className="px-4 py-2.5">
-                  <div className="font-medium">{m.name}</div>
-                  <div className="text-[10px] text-muted-foreground font-mono">{m.baseUrl}</div>
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground">{MODEL_TYPE_LABELS[m.type] ?? m.type}</td>
-                <td className="px-4 py-2.5 font-mono text-xs">{m.modelName}</td>
-                <td className="px-4 py-2.5 text-right">
-                  {m.isDefault && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-primary/10 text-primary border border-primary/20">默认</span>
-                  )}
-                  {m.userId === null && (
-                    <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground border border-border">全局</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-[11px] text-muted-foreground">
-        对话模型在聊天窗口中选择；向量化/重排序由系统自动使用默认模型。
-      </p>
-    </div>
   )
 }

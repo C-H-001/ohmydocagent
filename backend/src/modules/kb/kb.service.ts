@@ -37,7 +37,7 @@ import { CreateKbDto } from './dto/create-kb.dto.js';
 import { KB_VIEWS, KbView } from './dto/list-kb.dto.js';
 import { UpdateKbDto } from './dto/update-kb.dto.js';
 import { KnowledgeBase } from './kb.entity.js';
-import { Role, User } from '../users/user.entity.js';
+import { User } from '../users/user.entity.js';
 import { KbAccessService } from '../kb-share/kb-access.service.js';
 import { UserKbFavorite } from './user-kb-favorite.entity.js';
 import { UserKbPin } from './user-kb-pin.entity.js';
